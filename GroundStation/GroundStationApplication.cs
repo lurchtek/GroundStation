@@ -72,6 +72,11 @@ namespace GroundStationApplication
             //_serialPort.Close();
         }
 
+        public void WriteData(byte[] data, UInt16 size)
+        {
+            _serialPort.Write(data, 0, size);
+        }
+
         public MessageReadHandler MessageReadCallback; 
 
         private void _serialPort_DataReceived(object sender, SerialDataReceivedEventArgs e)
@@ -134,6 +139,8 @@ namespace GroundStationApplication
 
                             bytesReadFromMes = 0;
                             ReadingState = TReadingState.WaitingForStart;
+                            byteFromBuf = _serialPort.ReadByte();
+                            goto case TReadingState.WaitingForStart;
                         }
                         byteFromBuf = _serialPort.ReadByte();
                     }
@@ -169,7 +176,8 @@ namespace GroundStationApplication
         const int MagnetomIdx = 30;
 
         static Form1 _dataGraph = new Form1();
-
+        static SerialPortInterface _serialPortInterface = new SerialPortInterface();
+        
         public void WritePlotData(float x, float y, float z)
         {
             _dataGraph.AddData(x, y, z);
@@ -178,9 +186,9 @@ namespace GroundStationApplication
         static void Main(string[] args)
         {
             Application.EnableVisualStyles();
-            
-            SerialPortInterface _serialPortInterface = new SerialPortInterface();
             _serialPortInterface.MessageReadCallback = new SerialPortInterface.MessageReadHandler(InterpretMessage);
+            _dataGraph.UserSentFloatValue = new Form1.UserInputFloatDelegate(SendFloatCommandToDrone);
+            _dataGraph.UserSentUInt32Value = new Form1.UserInputUInt32Delegate(SendUInt32CommandToDrone);
 
             bool result;
 
@@ -198,6 +206,28 @@ namespace GroundStationApplication
             Application.Run(_dataGraph);
             //Console.ReadKey();
             _serialPortInterface.Close();
+        }
+
+        unsafe private static void SendFloatCommandToDrone(float value, Form1.TUserInput ID)
+        {
+            byte[] data = new byte[sizeof(float) + 1];
+            data[0] = ((byte*)(&value))[0];
+            data[1] = ((byte*)(&value))[1];
+            data[2] = ((byte*)(&value))[2];
+            data[3] = ((byte*)(&value))[3];
+            data[4] = (byte)ID;
+            _serialPortInterface.WriteData( data, (sizeof(float) + 1) );
+        }
+
+        unsafe private static void SendUInt32CommandToDrone(UInt32 value, Form1.TUserInput ID)
+        {
+            byte[] data = new byte[sizeof(UInt32) + 1];
+            data[0] = ((byte*)(&value))[0];
+            data[1] = ((byte*)(&value))[1];
+            data[2] = ((byte*)(&value))[2];
+            data[3] = ((byte*)(&value))[3];
+            data[4] = (byte)ID;
+            _serialPortInterface.WriteData(data, (sizeof(UInt32) + 1));
         }
 
         private static void InterpretMessage(byte[] dataBuffer, byte mesID)

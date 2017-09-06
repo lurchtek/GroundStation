@@ -11,6 +11,19 @@ namespace GroundStationApplication
 {
     public partial class Form1 : Form
     {
+        public enum TUserInput
+        {
+            KP_O,
+            KI_O,
+            KD_O,
+            KP_I,
+            KI_I,
+            KD_I,
+            MOTSPEED,
+            DRONESTATE
+        };
+        public delegate void UserInputFloatDelegate(float valToSend, TUserInput ID);
+        public delegate void UserInputUInt32Delegate(UInt32 valToSend, TUserInput ID);
         const int historyLength = 670;
         float[] historyX = new float[historyLength];
         float[] historyY = new float[historyLength];
@@ -25,7 +38,19 @@ namespace GroundStationApplication
         private TableLayoutPanel tableLayoutPanel1;
         private PictureBox accx;
         private PictureBox accy;
+        private TextBox pidkp_textBox;
+        private Button kpsend_button;
+        private TextBox pidki_textBox;
+        private TextBox pidkd_textBox;
+        private Button kisend_button;
+        private Button kdsend_button;
+        private TextBox setspeed_textBox;
+        private Button setspeed_button;
         private PictureBox accz;
+        private ComboBox state_ComboBox;
+        private Button setstate_button;
+        public UserInputFloatDelegate UserSentFloatValue;
+        public UserInputUInt32Delegate UserSentUInt32Value;
 
         public Form1()
         {
@@ -135,6 +160,16 @@ namespace GroundStationApplication
             this.accx = new System.Windows.Forms.PictureBox();
             this.accy = new System.Windows.Forms.PictureBox();
             this.accz = new System.Windows.Forms.PictureBox();
+            this.pidkp_textBox = new System.Windows.Forms.TextBox();
+            this.kpsend_button = new System.Windows.Forms.Button();
+            this.pidki_textBox = new System.Windows.Forms.TextBox();
+            this.pidkd_textBox = new System.Windows.Forms.TextBox();
+            this.kisend_button = new System.Windows.Forms.Button();
+            this.kdsend_button = new System.Windows.Forms.Button();
+            this.setspeed_textBox = new System.Windows.Forms.TextBox();
+            this.setspeed_button = new System.Windows.Forms.Button();
+            this.state_ComboBox = new System.Windows.Forms.ComboBox();
+            this.setstate_button = new System.Windows.Forms.Button();
             this.tableLayoutPanel1.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.accx)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.accy)).BeginInit();
@@ -143,13 +178,13 @@ namespace GroundStationApplication
             // 
             // tableLayoutPanel1
             // 
-            this.tableLayoutPanel1.ColumnCount = 2;
+            this.tableLayoutPanel1.ColumnCount = 1;
             this.tableLayoutPanel1.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50F));
             this.tableLayoutPanel1.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50F));
             this.tableLayoutPanel1.Controls.Add(this.accx, 0, 0);
             this.tableLayoutPanel1.Controls.Add(this.accy, 0, 1);
             this.tableLayoutPanel1.Controls.Add(this.accz, 0, 2);
-            this.tableLayoutPanel1.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.tableLayoutPanel1.Dock = System.Windows.Forms.DockStyle.Left;
             this.tableLayoutPanel1.Location = new System.Drawing.Point(0, 0);
             this.tableLayoutPanel1.Name = "tableLayoutPanel1";
             this.tableLayoutPanel1.RowCount = 4;
@@ -167,10 +202,9 @@ namespace GroundStationApplication
             this.accx.Dock = System.Windows.Forms.DockStyle.Fill;
             this.accx.Location = new System.Drawing.Point(3, 3);
             this.accx.Name = "accx";
-            this.accx.Size = new System.Drawing.Size(348, 129);
+            this.accx.Size = new System.Drawing.Size(702, 129);
             this.accx.TabIndex = 0;
             this.accx.TabStop = false;
-            this.accx.Click += new System.EventHandler(this.accz_Click);
             this.accx.Paint += new System.Windows.Forms.PaintEventHandler(this.accx_Paint);
             // 
             // accy
@@ -179,7 +213,7 @@ namespace GroundStationApplication
             this.accy.Dock = System.Windows.Forms.DockStyle.Fill;
             this.accy.Location = new System.Drawing.Point(3, 138);
             this.accy.Name = "accy";
-            this.accy.Size = new System.Drawing.Size(348, 129);
+            this.accy.Size = new System.Drawing.Size(702, 129);
             this.accy.TabIndex = 1;
             this.accy.TabStop = false;
             this.accy.Paint += new System.Windows.Forms.PaintEventHandler(this.accy_Paint);
@@ -190,14 +224,115 @@ namespace GroundStationApplication
             this.accz.Dock = System.Windows.Forms.DockStyle.Fill;
             this.accz.Location = new System.Drawing.Point(3, 273);
             this.accz.Name = "accz";
-            this.accz.Size = new System.Drawing.Size(348, 129);
+            this.accz.Size = new System.Drawing.Size(702, 129);
             this.accz.TabIndex = 2;
             this.accz.TabStop = false;
             this.accz.Paint += new System.Windows.Forms.PaintEventHandler(this.accz_Paint);
             // 
+            // pidkp_textBox
+            // 
+            this.pidkp_textBox.Location = new System.Drawing.Point(714, 12);
+            this.pidkp_textBox.Name = "pidkp_textBox";
+            this.pidkp_textBox.Size = new System.Drawing.Size(100, 20);
+            this.pidkp_textBox.TabIndex = 0;
+            // 
+            // kpsend_button
+            // 
+            this.kpsend_button.Location = new System.Drawing.Point(820, 12);
+            this.kpsend_button.Name = "kpsend_button";
+            this.kpsend_button.Size = new System.Drawing.Size(75, 20);
+            this.kpsend_button.TabIndex = 1;
+            this.kpsend_button.Text = "Kp_Send";
+            this.kpsend_button.UseVisualStyleBackColor = true;
+            this.kpsend_button.Click += new System.EventHandler(this.kpsend_button_Click);
+            // 
+            // pidki_textBox
+            // 
+            this.pidki_textBox.Location = new System.Drawing.Point(714, 38);
+            this.pidki_textBox.Name = "pidki_textBox";
+            this.pidki_textBox.Size = new System.Drawing.Size(100, 20);
+            this.pidki_textBox.TabIndex = 2;
+            // 
+            // pidkd_textBox
+            // 
+            this.pidkd_textBox.Location = new System.Drawing.Point(714, 64);
+            this.pidkd_textBox.Name = "pidkd_textBox";
+            this.pidkd_textBox.Size = new System.Drawing.Size(100, 20);
+            this.pidkd_textBox.TabIndex = 3;
+            // 
+            // kisend_button
+            // 
+            this.kisend_button.Location = new System.Drawing.Point(820, 38);
+            this.kisend_button.Name = "kisend_button";
+            this.kisend_button.Size = new System.Drawing.Size(75, 20);
+            this.kisend_button.TabIndex = 4;
+            this.kisend_button.Text = "Ki_Send";
+            this.kisend_button.UseVisualStyleBackColor = true;
+            this.kisend_button.Click += new System.EventHandler(this.kisend_button_Click);
+            // 
+            // kdsend_button
+            // 
+            this.kdsend_button.Location = new System.Drawing.Point(820, 64);
+            this.kdsend_button.Name = "kdsend_button";
+            this.kdsend_button.Size = new System.Drawing.Size(75, 20);
+            this.kdsend_button.TabIndex = 5;
+            this.kdsend_button.Text = "Kd_Send";
+            this.kdsend_button.UseVisualStyleBackColor = true;
+            this.kdsend_button.Click += new System.EventHandler(this.kdsend_button_Click);
+            // 
+            // setspeed_textBox
+            // 
+            this.setspeed_textBox.Location = new System.Drawing.Point(714, 90);
+            this.setspeed_textBox.Name = "setspeed_textBox";
+            this.setspeed_textBox.Size = new System.Drawing.Size(100, 20);
+            this.setspeed_textBox.TabIndex = 6;
+            // 
+            // setspeed_button
+            // 
+            this.setspeed_button.Location = new System.Drawing.Point(820, 90);
+            this.setspeed_button.Name = "setspeed_button";
+            this.setspeed_button.Size = new System.Drawing.Size(75, 20);
+            this.setspeed_button.TabIndex = 7;
+            this.setspeed_button.Text = "SetSpeed";
+            this.setspeed_button.UseVisualStyleBackColor = true;
+            this.setspeed_button.Click += new System.EventHandler(this.setspeed_button_Click);
+            // 
+            // state_ComboBox
+            // 
+            this.state_ComboBox.FormattingEnabled = true;
+            this.state_ComboBox.Items.AddRange(new object[] {
+            "Balance",
+            "Running",
+            "Test"});
+            this.state_ComboBox.Location = new System.Drawing.Point(714, 116);
+            this.state_ComboBox.Name = "state_ComboBox";
+            this.state_ComboBox.Size = new System.Drawing.Size(100, 21);
+            this.state_ComboBox.TabIndex = 8;
+            // 
+            // setstate_button
+            // 
+            this.setstate_button.Location = new System.Drawing.Point(820, 117);
+            this.setstate_button.Name = "setstate_button";
+            this.setstate_button.Size = new System.Drawing.Size(75, 20);
+            this.setstate_button.TabIndex = 9;
+            this.setstate_button.Text = "SetState";
+            this.setstate_button.UseVisualStyleBackColor = true;
+            this.setstate_button.Click += new System.EventHandler(this.setstate_button_Click);
+            // 
             // Form1
             // 
-            this.ClientSize = new System.Drawing.Size(708, 452);
+            this.AutoScroll = true;
+            this.ClientSize = new System.Drawing.Size(895, 452);
+            this.Controls.Add(this.setstate_button);
+            this.Controls.Add(this.state_ComboBox);
+            this.Controls.Add(this.setspeed_button);
+            this.Controls.Add(this.setspeed_textBox);
+            this.Controls.Add(this.kdsend_button);
+            this.Controls.Add(this.kisend_button);
+            this.Controls.Add(this.kpsend_button);
+            this.Controls.Add(this.pidkd_textBox);
+            this.Controls.Add(this.pidki_textBox);
+            this.Controls.Add(this.pidkp_textBox);
             this.Controls.Add(this.tableLayoutPanel1);
             this.Name = "Form1";
             this.WindowState = System.Windows.Forms.FormWindowState.Maximized;
@@ -207,6 +342,7 @@ namespace GroundStationApplication
             ((System.ComponentModel.ISupportInitialize)(this.accy)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.accz)).EndInit();
             this.ResumeLayout(false);
+            this.PerformLayout();
 
         }
 
@@ -227,9 +363,53 @@ namespace GroundStationApplication
 
         }
 
-        private void accz_Click(object sender, EventArgs e)
+        private void textBox1_TextChanged(object sender, EventArgs e)
         {
 
+        }
+
+        private void kpsend_button_Click(object sender, EventArgs e)
+        {
+            float val = Convert.ToSingle(this.pidkp_textBox.Text);
+            UserSentFloatValue(val, TUserInput.KP_O);
+        }
+
+        private void kisend_button_Click(object sender, EventArgs e)
+        {
+            float val = Convert.ToSingle(this.pidki_textBox.Text);
+            UserSentFloatValue(val, TUserInput.KI_O);
+        }
+
+        private void kdsend_button_Click(object sender, EventArgs e)
+        {
+            float val = Convert.ToSingle(this.pidkd_textBox.Text);
+            UserSentFloatValue(val, TUserInput.KD_O);
+        }
+
+        private void setspeed_button_Click(object sender, EventArgs e)
+        {
+            UInt32 val = Convert.ToUInt32(this.setspeed_textBox.Text);
+            UserSentUInt32Value(val, TUserInput.MOTSPEED);
+        }
+
+        private void setstate_button_Click(object sender, EventArgs e)
+        {
+            string boxValue = Convert.ToString(this.state_ComboBox.SelectedItem);
+            
+            //constants sent should match the state enumerator in drone SW
+            if("Balance" == boxValue)
+            {
+                UserSentUInt32Value(3, TUserInput.DRONESTATE);
+            }
+            else if("Running" == boxValue)
+            {
+                UserSentUInt32Value(4, TUserInput.DRONESTATE);
+            }
+            else if ("Test" == boxValue)
+            {
+                UserSentUInt32Value(5, TUserInput.DRONESTATE);
+            }
+            else { }
         }
     }
 }
