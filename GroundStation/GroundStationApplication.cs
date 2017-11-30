@@ -1,6 +1,8 @@
 ﻿using System;
+using System.IO;
 using System.IO.Ports;
 using System.Windows.Forms;
+using System.Text;
 
 namespace GroundStationApplication
 {
@@ -18,16 +20,19 @@ namespace GroundStationApplication
         };
         public delegate void MessageReadHandler(byte[] dataBuffer, byte mesID);
 
-        const int RawSensorData_MesId = 0xF0;
-        const int EulerAngles_MesId = 0xF1;
+        const int AccelSensorData_MesId = 0xF0;
+        const int GyroSensorData_MesId = 0xF1;
+        const int MagnSensorData_MesId = 0xF2;
+        const int EulerAnglesData_MesId = 0xF3;
+        const int MixedData_MesId = 0xF4;
         const int StartByte = 0x7E;
         const int EndByte = 0x81;
-        const int LenOfRawSensorDataMes = 43;
+        const int LenOfDataMes = 16;
 
         const int StartByteIdx = 0;
         const int CommandIdx = 1;
         const int LenIdx = 2;
-        const int EndByteIdx = 42;
+        const int EndByteIdx = 15;
 
         private SerialPort _serialPort = new SerialPort();
         private int _baudRate = 57600;
@@ -41,7 +46,7 @@ namespace GroundStationApplication
         private int bytesReadFromMes = 0;
 
         //Initialize a buffer to hold the received data 
-        private byte[] mesBuffer = new byte[LenOfRawSensorDataMes];
+        private byte[] mesBuffer = new byte[LenOfDataMes];
 
         public int BaudRate { get { return _baudRate; } set { _baudRate = value; } }
         public int DataBits { get { return _dataBits; } set { _dataBits = value; } }
@@ -105,10 +110,15 @@ namespace GroundStationApplication
                     }
                     break;
                 case TReadingState.CheckValidID:
-                    if (RawSensorData_MesId == byteFromBuf)
+                    if ( (AccelSensorData_MesId == byteFromBuf) ||
+                         (GyroSensorData_MesId  == byteFromBuf) ||
+                         (MagnSensorData_MesId  == byteFromBuf) ||
+                         (EulerAnglesData_MesId == byteFromBuf) ||
+                         (MixedData_MesId       == byteFromBuf)
+                       )
                     {
                         buffer[StartByteIdx] = (byte)StartByte;
-                        buffer[CommandIdx] = (byte)RawSensorData_MesId;
+                        buffer[CommandIdx] = (byte)byteFromBuf;
                         CopyBytesToMesBuffer(buffer, 2);
                         byteFromBuf = _serialPort.ReadByte();
                         //Console.WriteLine("Message reading started");
@@ -126,7 +136,7 @@ namespace GroundStationApplication
                         buffer[0] = (byte)byteFromBuf;
                         CopyBytesToMesBuffer(buffer, 1);
 
-                        if (LenOfRawSensorDataMes == bytesReadFromMes)
+                        if (LenOfDataMes == bytesReadFromMes)
                         {
                             if (EndByte == mesBuffer[EndByteIdx])
                             {
@@ -152,7 +162,7 @@ namespace GroundStationApplication
         {
             int index;
 
-            for (index = 0; (index < bytesRead) && (bytesReadFromMes < LenOfRawSensorDataMes); index++, bytesReadFromMes++)
+            for (index = 0; (index < bytesRead) && (bytesReadFromMes < LenOfDataMes); index++, bytesReadFromMes++)
             {
                 mesBuffer[bytesReadFromMes] = buffer[index];
             }
@@ -163,18 +173,33 @@ namespace GroundStationApplication
 
     class GroundStationExecute
     {
-        const int RawSensorData_MesId = 0xF0;
-        const int EulerAngles_MesId = 0xF1;
-        const int LenOfRawSensorDataMes = 43;
+        const int AccelSensorData_MesId = 0xF0;
+        const int GyroSensorData_MesId = 0xF1;
+        const int MagnSensorData_MesId = 0xF2;
+        const int EulerAnglesData_MesId = 0xF3;
+        const int MixedData_MesId = 0xF4;
 
         const int CommandIdx = 1;
-        const int TimestampIdx = 2;
-        const int AccxIdx = 6;
-        const int AccyIdx = 10;
-        const int AcczIdx = 14;
-        const int GyroIdx = 18;
-        const int MagnetomIdx = 30;
+        const int TimestampIdx = 14;
+        const int AccxIdx = 2;
+        const int AccyIdx = 6;
+        const int AcczIdx = 10;
+        const int GyroxIdx = 2;
+        const int GyroyIdx = 6;
+        const int GyrozIdx = 10;
+        const int MagnxIdx = 2;
+        const int MagnyIdx = 6;
+        const int MagnzIdx = 10;
+        const int RollIdx = 2;
+        const int PitchIdx = 6;
+        const int YawIdx = 10;
+        const int Signal1Idx = 2;
+        const int Signal2Idx = 6;
+        const int Signal3Idx = 10;
+        const Boolean dataLoggingEnabled = false;
 
+        static UInt32 samplesCollected = 0;
+        static StringBuilder csv = new StringBuilder();
         static Form1 _dataGraph = new Form1();
         static SerialPortInterface _serialPortInterface = new SerialPortInterface();
         
@@ -232,27 +257,98 @@ namespace GroundStationApplication
 
         private static void InterpretMessage(byte[] dataBuffer, byte mesID)
         {
-            int miliseconds = 0;
-            int seconds;
-            int minutes;
+            //int miliseconds = 0;
+            //int seconds;
+            //int minutes;
             float accx;
             float accy;
             float accz;
+            float gyrox;
+            float gyroy;
+            float gyroz;
+            float magnx;
+            float magny;
+            float magnz;
+            float roll;
+            float pitch;
+            float yaw;
+            float signal1;
+            float signal2;
+            float signal3;
+            string first;
+            string second;
+            string third;
 
-            if ( RawSensorData_MesId == dataBuffer[CommandIdx] )
+            if (AccelSensorData_MesId == dataBuffer[CommandIdx] )
             {
-                //Endian
-                miliseconds = BitConverter.ToUInt16(dataBuffer, TimestampIdx);
-                minutes = dataBuffer[TimestampIdx + 3];
-                seconds = dataBuffer[TimestampIdx + 2];
+                //miliseconds = BitConverter.ToUInt16(dataBuffer, TimestampIdx);
+                //minutes = dataBuffer[TimestampIdx + 3];
+                //seconds = dataBuffer[TimestampIdx + 2];
                 accx = BitConverter.ToSingle(dataBuffer, AccxIdx);
                 accy = BitConverter.ToSingle(dataBuffer, AccyIdx);
                 accz = BitConverter.ToSingle(dataBuffer, AcczIdx);
 
                 _dataGraph.AddData(accx, accy, accz);
-                Console.WriteLine(minutes);
-                Console.WriteLine(seconds);
-                Console.WriteLine(accz);
+            }
+            else if (GyroSensorData_MesId == dataBuffer[CommandIdx])
+            {
+                //miliseconds = BitConverter.ToUInt16(dataBuffer, TimestampIdx);
+                //minutes = dataBuffer[TimestampIdx + 3];
+                //seconds = dataBuffer[TimestampIdx + 2];
+                gyrox = ((BitConverter.ToSingle(dataBuffer, GyroxIdx)) / 32767.0f) * 1100.0f;
+                gyroy = ((BitConverter.ToSingle(dataBuffer, GyroyIdx)) / 32767.0f) * 1100.0f;
+                gyroz = ((BitConverter.ToSingle(dataBuffer, GyrozIdx)) / 32767.0f) * 1100.0f;
+
+                _dataGraph.AddData(gyrox, gyroy, gyroz);
+            }
+            else if (MagnSensorData_MesId == dataBuffer[CommandIdx])
+            {
+                //miliseconds = BitConverter.ToUInt16(dataBuffer, TimestampIdx);
+                //minutes = dataBuffer[TimestampIdx + 3];
+                //seconds = dataBuffer[TimestampIdx + 2];
+                magnx = ((BitConverter.ToSingle(dataBuffer, MagnxIdx)) / 1.3f) * 1100.0f;
+                magny = ((BitConverter.ToSingle(dataBuffer, MagnyIdx)) / 1.3f) * 1100.0f;
+                magnz = ((BitConverter.ToSingle(dataBuffer, MagnzIdx)) / 1.3f) * 1100.0f;
+
+                _dataGraph.AddData(magnx, magny, magnz);
+            }
+            else if (EulerAnglesData_MesId == dataBuffer[CommandIdx])
+            {
+                //miliseconds = BitConverter.ToUInt16(dataBuffer, TimestampIdx);
+                //minutes = dataBuffer[TimestampIdx + 3];
+                //seconds = dataBuffer[TimestampIdx + 2];
+                roll = (BitConverter.ToSingle(dataBuffer, RollIdx)) / 180.0f * 1100.0f;
+                pitch = -((BitConverter.ToSingle(dataBuffer, PitchIdx)) / 90.0f * 1100.0f);
+                yaw = (BitConverter.ToSingle(dataBuffer, YawIdx)) / 180.0f * 1100.0f;
+
+                _dataGraph.AddData(roll, pitch, yaw);
+            }
+            else if (MixedData_MesId == dataBuffer[CommandIdx])
+            {
+                signal1 = BitConverter.ToSingle(dataBuffer, Signal1Idx);
+                signal2 = BitConverter.ToSingle(dataBuffer, Signal2Idx);
+                signal3 = BitConverter.ToSingle(dataBuffer, Signal3Idx);
+                if (true == dataLoggingEnabled)
+                {
+                    if (1000 > samplesCollected)
+                    {
+                        first = Convert.ToString(signal1);
+                        second = Convert.ToString(signal2);
+                        third = Convert.ToString(signal3);
+                        samplesCollected++;
+                        var newLine = string.Format("{0},{1},{2}", first, second, third);
+                        csv.AppendLine(newLine);
+                        if (1000 == samplesCollected)
+                        {
+                            File.WriteAllText("C:/Users/Lurch/GIT/Quad/tools/CollectedDataSamples/newData.csv", csv.ToString());
+                        }
+                    }
+                }
+
+                _dataGraph.AddData(signal1, signal2, signal3);
+                //Console.WriteLine(minutes);
+                //Console.WriteLine(seconds);
+                //Console.WriteLine(accz);
             }
             else
             {

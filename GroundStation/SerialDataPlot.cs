@@ -13,14 +13,16 @@ namespace GroundStationApplication
     {
         public enum TUserInput
         {
-            KP_O,
-            KI_O,
-            KD_O,
-            KP_I,
-            KI_I,
-            KD_I,
+            KP,
+            KI,
+            KD,
             MOTSPEED,
-            DRONESTATE
+            DRONESTATE,
+            KALMAN_Q,
+            KALMAN_R,
+            KALMAN_P,
+            PITCHREF,
+            MESSEL
         };
         public delegate void UserInputFloatDelegate(float valToSend, TUserInput ID);
         public delegate void UserInputUInt32Delegate(UInt32 valToSend, TUserInput ID);
@@ -39,9 +41,9 @@ namespace GroundStationApplication
         private PictureBox accx;
         private PictureBox accy;
         private TextBox pidkp_textBox;
-        private Button kpsend_button;
         private TextBox pidki_textBox;
         private TextBox pidkd_textBox;
+        private Button kpsend_button;
         private Button kisend_button;
         private Button kdsend_button;
         private TextBox setspeed_textBox;
@@ -50,6 +52,16 @@ namespace GroundStationApplication
         private ComboBox state_ComboBox;
         private Button setstate_button;
         public UserInputFloatDelegate UserSentFloatValue;
+        private TextBox set_kalmanQ_textBox;
+        private TextBox set_kalmanR_textBox;
+        private TextBox set_kalmanP_textBox;
+        private Button set_kalmanQ_button;
+        private Button set_kalmanR_button;
+        private Button set_kalmanP_button;
+        private TextBox pitch_textBox;
+        private Button pitchsend_button;
+        private Button messel_button;
+        private ComboBox messel_comboBox;
         public UserInputUInt32Delegate UserSentUInt32Value;
 
         public Form1()
@@ -145,9 +157,52 @@ namespace GroundStationApplication
 
         public void AddData(float accx, float accy, float accz)
         {
-            float accxScaled = ((accx / 1100.0f) * (this.accx.Size.Height / 2)) + (this.accx.Size.Height / 2);
-            float accyScaled = ((accy / 1100.0f) * (this.accy.Size.Height / 2)) + (this.accy.Size.Height / 2);
-            float acczScaled = ((accz / 1100.0f) * (this.accz.Size.Height / 2)) + (this.accz.Size.Height / 2);
+            float accxScaled;
+            float accyScaled;
+            float acczScaled;
+
+            if(1100.0 < accx)
+            {
+                accxScaled = 1100.0f;
+            }
+            else if(-1100.0 > accx)
+            {
+                accxScaled = -1100.0f;
+            }
+            else
+            {
+                accxScaled = accx;
+            }
+
+            if (1100.0 < accy)
+            {
+                accyScaled = 1100.0f;
+            }
+            else if (-1100.0 > accy)
+            {
+                accyScaled = -1100.0f;
+            }
+            else
+            {
+                accyScaled = accy;
+            }
+
+            if (1100.0 < accz)
+            {
+                acczScaled = 1100.0f;
+            }
+            else if (-1100.0 > accz)
+            {
+                acczScaled = -1100.0f;
+            }
+            else
+            {
+                acczScaled = accz;
+            }
+
+            accxScaled = ((accxScaled / 1100.0f) * (this.accx.Size.Height / 2)) + (this.accx.Size.Height / 2);
+            accyScaled = ((accyScaled / 1100.0f) * (this.accy.Size.Height / 2)) + (this.accy.Size.Height / 2);
+            acczScaled = ((acczScaled / 1100.0f) * (this.accz.Size.Height / 2)) + (this.accz.Size.Height / 2);
             AddValue(accxScaled, accyScaled, acczScaled);
             this.accx.Invalidate();
             this.accy.Invalidate();
@@ -170,6 +225,16 @@ namespace GroundStationApplication
             this.setspeed_button = new System.Windows.Forms.Button();
             this.state_ComboBox = new System.Windows.Forms.ComboBox();
             this.setstate_button = new System.Windows.Forms.Button();
+            this.set_kalmanQ_textBox = new System.Windows.Forms.TextBox();
+            this.set_kalmanR_textBox = new System.Windows.Forms.TextBox();
+            this.set_kalmanP_textBox = new System.Windows.Forms.TextBox();
+            this.set_kalmanQ_button = new System.Windows.Forms.Button();
+            this.set_kalmanR_button = new System.Windows.Forms.Button();
+            this.set_kalmanP_button = new System.Windows.Forms.Button();
+            this.pitch_textBox = new System.Windows.Forms.TextBox();
+            this.pitchsend_button = new System.Windows.Forms.Button();
+            this.messel_button = new System.Windows.Forms.Button();
+            this.messel_comboBox = new System.Windows.Forms.ComboBox();
             this.tableLayoutPanel1.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.accx)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.accy)).BeginInit();
@@ -282,14 +347,14 @@ namespace GroundStationApplication
             // 
             // setspeed_textBox
             // 
-            this.setspeed_textBox.Location = new System.Drawing.Point(714, 90);
+            this.setspeed_textBox.Location = new System.Drawing.Point(714, 247);
             this.setspeed_textBox.Name = "setspeed_textBox";
             this.setspeed_textBox.Size = new System.Drawing.Size(100, 20);
             this.setspeed_textBox.TabIndex = 6;
             // 
             // setspeed_button
             // 
-            this.setspeed_button.Location = new System.Drawing.Point(820, 90);
+            this.setspeed_button.Location = new System.Drawing.Point(820, 247);
             this.setspeed_button.Name = "setspeed_button";
             this.setspeed_button.Size = new System.Drawing.Size(75, 20);
             this.setspeed_button.TabIndex = 7;
@@ -303,15 +368,16 @@ namespace GroundStationApplication
             this.state_ComboBox.Items.AddRange(new object[] {
             "Balance",
             "Running",
-            "Test"});
-            this.state_ComboBox.Location = new System.Drawing.Point(714, 116);
+            "Test",
+            "Idle"});
+            this.state_ComboBox.Location = new System.Drawing.Point(714, 283);
             this.state_ComboBox.Name = "state_ComboBox";
             this.state_ComboBox.Size = new System.Drawing.Size(100, 21);
             this.state_ComboBox.TabIndex = 8;
             // 
             // setstate_button
             // 
-            this.setstate_button.Location = new System.Drawing.Point(820, 117);
+            this.setstate_button.Location = new System.Drawing.Point(820, 284);
             this.setstate_button.Name = "setstate_button";
             this.setstate_button.Size = new System.Drawing.Size(75, 20);
             this.setstate_button.TabIndex = 9;
@@ -319,10 +385,112 @@ namespace GroundStationApplication
             this.setstate_button.UseVisualStyleBackColor = true;
             this.setstate_button.Click += new System.EventHandler(this.setstate_button_Click);
             // 
+            // set_kalmanQ_textBox
+            // 
+            this.set_kalmanQ_textBox.Location = new System.Drawing.Point(714, 325);
+            this.set_kalmanQ_textBox.Name = "set_kalmanQ_textBox";
+            this.set_kalmanQ_textBox.Size = new System.Drawing.Size(100, 20);
+            this.set_kalmanQ_textBox.TabIndex = 10;
+            // 
+            // set_kalmanR_textBox
+            // 
+            this.set_kalmanR_textBox.Location = new System.Drawing.Point(714, 352);
+            this.set_kalmanR_textBox.Name = "set_kalmanR_textBox";
+            this.set_kalmanR_textBox.Size = new System.Drawing.Size(100, 20);
+            this.set_kalmanR_textBox.TabIndex = 11;
+            // 
+            // set_kalmanP_textBox
+            // 
+            this.set_kalmanP_textBox.Location = new System.Drawing.Point(714, 378);
+            this.set_kalmanP_textBox.Name = "set_kalmanP_textBox";
+            this.set_kalmanP_textBox.Size = new System.Drawing.Size(100, 20);
+            this.set_kalmanP_textBox.TabIndex = 12;
+            // 
+            // set_kalmanQ_button
+            // 
+            this.set_kalmanQ_button.Location = new System.Drawing.Point(820, 325);
+            this.set_kalmanQ_button.Name = "set_kalmanQ_button";
+            this.set_kalmanQ_button.Size = new System.Drawing.Size(80, 20);
+            this.set_kalmanQ_button.TabIndex = 13;
+            this.set_kalmanQ_button.Text = "SetKalmanQ";
+            this.set_kalmanQ_button.UseVisualStyleBackColor = true;
+            this.set_kalmanQ_button.Click += new System.EventHandler(this.set_kalmanQ_button_Click);
+            // 
+            // set_kalmanR_button
+            // 
+            this.set_kalmanR_button.Location = new System.Drawing.Point(820, 352);
+            this.set_kalmanR_button.Name = "set_kalmanR_button";
+            this.set_kalmanR_button.Size = new System.Drawing.Size(80, 20);
+            this.set_kalmanR_button.TabIndex = 14;
+            this.set_kalmanR_button.Text = "SetKalmanR";
+            this.set_kalmanR_button.UseVisualStyleBackColor = true;
+            this.set_kalmanR_button.Click += new System.EventHandler(this.set_kalmanR_button_Click);
+            // 
+            // set_kalmanP_button
+            // 
+            this.set_kalmanP_button.Location = new System.Drawing.Point(820, 378);
+            this.set_kalmanP_button.Name = "set_kalmanP_button";
+            this.set_kalmanP_button.Size = new System.Drawing.Size(80, 20);
+            this.set_kalmanP_button.TabIndex = 15;
+            this.set_kalmanP_button.Text = "SetKalmanP";
+            this.set_kalmanP_button.UseVisualStyleBackColor = true;
+            this.set_kalmanP_button.Click += new System.EventHandler(this.set_kalmanP_button_Click);
+            // 
+            // pitch_textBox
+            // 
+            this.pitch_textBox.Location = new System.Drawing.Point(714, 121);
+            this.pitch_textBox.Name = "pitch_textBox";
+            this.pitch_textBox.Size = new System.Drawing.Size(100, 20);
+            this.pitch_textBox.TabIndex = 16;
+            // 
+            // pitchsend_button
+            // 
+            this.pitchsend_button.Location = new System.Drawing.Point(820, 121);
+            this.pitchsend_button.Name = "pitchsend_button";
+            this.pitchsend_button.Size = new System.Drawing.Size(75, 20);
+            this.pitchsend_button.TabIndex = 17;
+            this.pitchsend_button.Text = "Pitch_Send";
+            this.pitchsend_button.UseVisualStyleBackColor = true;
+            this.pitchsend_button.Click += new System.EventHandler(this.pitchsend_button_Click);
+            // 
+            // messel_button
+            // 
+            this.messel_button.Location = new System.Drawing.Point(820, 168);
+            this.messel_button.Name = "messel_button";
+            this.messel_button.Size = new System.Drawing.Size(75, 20);
+            this.messel_button.TabIndex = 19;
+            this.messel_button.Text = "SelMessage";
+            this.messel_button.UseVisualStyleBackColor = true;
+            this.messel_button.Click += new System.EventHandler(this.messel_button_Click);
+            // 
+            // messel_comboBox
+            // 
+            this.messel_comboBox.FormattingEnabled = true;
+            this.messel_comboBox.Items.AddRange(new object[] {
+            "AccelMes",
+            "GyroMes",
+            "MagnMes",
+            "EulerMes",
+            "MixedMes"});
+            this.messel_comboBox.Location = new System.Drawing.Point(714, 168);
+            this.messel_comboBox.Name = "messel_comboBox";
+            this.messel_comboBox.Size = new System.Drawing.Size(100, 21);
+            this.messel_comboBox.TabIndex = 20;
+            // 
             // Form1
             // 
             this.AutoScroll = true;
-            this.ClientSize = new System.Drawing.Size(895, 452);
+            this.ClientSize = new System.Drawing.Size(913, 452);
+            this.Controls.Add(this.messel_comboBox);
+            this.Controls.Add(this.messel_button);
+            this.Controls.Add(this.pitchsend_button);
+            this.Controls.Add(this.pitch_textBox);
+            this.Controls.Add(this.set_kalmanP_button);
+            this.Controls.Add(this.set_kalmanR_button);
+            this.Controls.Add(this.set_kalmanQ_button);
+            this.Controls.Add(this.set_kalmanP_textBox);
+            this.Controls.Add(this.set_kalmanR_textBox);
+            this.Controls.Add(this.set_kalmanQ_textBox);
             this.Controls.Add(this.setstate_button);
             this.Controls.Add(this.state_ComboBox);
             this.Controls.Add(this.setspeed_button);
@@ -371,19 +539,19 @@ namespace GroundStationApplication
         private void kpsend_button_Click(object sender, EventArgs e)
         {
             float val = Convert.ToSingle(this.pidkp_textBox.Text);
-            UserSentFloatValue(val, TUserInput.KP_O);
+            UserSentFloatValue(val, TUserInput.KP);
         }
 
         private void kisend_button_Click(object sender, EventArgs e)
         {
             float val = Convert.ToSingle(this.pidki_textBox.Text);
-            UserSentFloatValue(val, TUserInput.KI_O);
+            UserSentFloatValue(val, TUserInput.KI);
         }
 
         private void kdsend_button_Click(object sender, EventArgs e)
         {
             float val = Convert.ToSingle(this.pidkd_textBox.Text);
-            UserSentFloatValue(val, TUserInput.KD_O);
+            UserSentFloatValue(val, TUserInput.KD);
         }
 
         private void setspeed_button_Click(object sender, EventArgs e)
@@ -408,6 +576,61 @@ namespace GroundStationApplication
             else if ("Test" == boxValue)
             {
                 UserSentUInt32Value(5, TUserInput.DRONESTATE);
+            }
+            else if ("Idle" == boxValue)
+            {
+                UserSentUInt32Value(6, TUserInput.DRONESTATE);
+            }
+            else { }
+        }
+
+        private void set_kalmanQ_button_Click(object sender, EventArgs e)
+        {
+            float val = Convert.ToSingle(this.set_kalmanQ_textBox.Text);
+            UserSentFloatValue(val, TUserInput.KALMAN_Q);
+        }
+
+        private void set_kalmanR_button_Click(object sender, EventArgs e)
+        {
+            float val = Convert.ToSingle(this.set_kalmanR_textBox.Text);
+            UserSentFloatValue(val, TUserInput.KALMAN_R);
+        }
+
+        private void set_kalmanP_button_Click(object sender, EventArgs e)
+        {
+            float val = Convert.ToSingle(this.set_kalmanP_textBox.Text);
+            UserSentFloatValue(val, TUserInput.KALMAN_P);
+        }
+
+        private void pitchsend_button_Click(object sender, EventArgs e)
+        {
+            float val = Convert.ToSingle(this.pitch_textBox.Text);
+            UserSentFloatValue(val, TUserInput.PITCHREF);
+        }
+
+        private void messel_button_Click(object sender, EventArgs e)
+        {
+            string boxValue = Convert.ToString(this.messel_comboBox.SelectedItem);
+
+            if ("AccelMes" == boxValue)
+            {
+                UserSentUInt32Value(0xF0, TUserInput.MESSEL);
+            }
+            else if ("GyroMes" == boxValue)
+            {
+                UserSentUInt32Value(0xF1, TUserInput.MESSEL);
+            }
+            else if ("MagnMes" == boxValue)
+            {
+                UserSentUInt32Value(0xF2, TUserInput.MESSEL);
+            }
+            else if ("EulerMes" == boxValue)
+            {
+                UserSentUInt32Value(0xF3, TUserInput.MESSEL);
+            }
+            else if ("MixedMes" == boxValue)
+            {
+                UserSentUInt32Value(0xF4, TUserInput.MESSEL);
             }
             else { }
         }
