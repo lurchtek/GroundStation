@@ -3,6 +3,7 @@ using System.IO;
 using System.IO.Ports;
 using System.Windows.Forms;
 using System.Text;
+using System.Collections;
 
 namespace GroundStationApplication
 {
@@ -20,14 +21,19 @@ namespace GroundStationApplication
         };
         public delegate void MessageReadHandler(byte[] dataBuffer, byte mesID);
 
-        const int AccelSensorData_MesId = 0xF0;
-        const int GyroSensorData_MesId = 0xF1;
-        const int MagnSensorData_MesId = 0xF2;
-        const int EulerAnglesData_MesId = 0xF3;
-        const int MixedData_MesId = 0xF4;
-        const int StartByte = 0x7E;
-        const int EndByte = 0x81;
+        const int NoMessage_MesId = 0xF0;
+        const int AccelSensorData_MesId = 0xF1;
+        const int GyroSensorData_MesId = 0xF2;
+        const int MagnSensorData_MesId = 0xF3;
+        const int EulerAnglesData_MesId = 0xF4;
+        const int MixedData_MesId = 0xF5;
+        const int PidData_MesId = 0xF6;
+        const int AttitudeLog_MesId = 0xF7;
+        const int Empty_MesId = 0xF8;
+        public const int StartByte = 0x7E;
+        public const int EndByte = 0x81;
         const int LenOfDataMes = 16;
+        const int LenOfEmptyMes = 4;
 
         const int StartByteIdx = 0;
         const int CommandIdx = 1;
@@ -44,7 +50,7 @@ namespace GroundStationApplication
 
         private TReadingState ReadingState = TReadingState.WaitingForStart;
         private int bytesReadFromMes = 0;
-
+        private int lengthOfCurrentMessage = 0;
         //Initialize a buffer to hold the received data 
         private byte[] mesBuffer = new byte[LenOfDataMes];
 
@@ -114,9 +120,20 @@ namespace GroundStationApplication
                          (GyroSensorData_MesId  == byteFromBuf) ||
                          (MagnSensorData_MesId  == byteFromBuf) ||
                          (EulerAnglesData_MesId == byteFromBuf) ||
-                         (MixedData_MesId       == byteFromBuf)
+                         (MixedData_MesId       == byteFromBuf) ||
+                         (PidData_MesId         == byteFromBuf) ||
+                         (AttitudeLog_MesId     == byteFromBuf) ||
+                         (Empty_MesId           == byteFromBuf)
                        )
                     {
+                        if(Empty_MesId == byteFromBuf)
+                        {
+                            lengthOfCurrentMessage = LenOfEmptyMes;
+                        }
+                        else
+                        {
+                            lengthOfCurrentMessage = LenOfDataMes;
+                        }
                         buffer[StartByteIdx] = (byte)StartByte;
                         buffer[CommandIdx] = (byte)byteFromBuf;
                         CopyBytesToMesBuffer(buffer, 2);
@@ -127,18 +144,18 @@ namespace GroundStationApplication
                     }
                     else
                     {
+                        goto case TReadingState.WaitingForStart;
                         Console.WriteLine("Wrong data read!");
                     }
-                    break;
                 case TReadingState.ReadingPayload:
                     while(-1 != byteFromBuf)
                     {
                         buffer[0] = (byte)byteFromBuf;
                         CopyBytesToMesBuffer(buffer, 1);
 
-                        if (LenOfDataMes == bytesReadFromMes)
+                        if (lengthOfCurrentMessage == bytesReadFromMes)
                         {
-                            if (EndByte == mesBuffer[EndByteIdx])
+                            if (EndByte == mesBuffer[lengthOfCurrentMessage - 1])
                             {
                                 MessageReadCallback( mesBuffer, mesBuffer[CommandIdx]);
                             }
@@ -173,11 +190,15 @@ namespace GroundStationApplication
 
     class GroundStationExecute
     {
-        const int AccelSensorData_MesId = 0xF0;
-        const int GyroSensorData_MesId = 0xF1;
-        const int MagnSensorData_MesId = 0xF2;
-        const int EulerAnglesData_MesId = 0xF3;
-        const int MixedData_MesId = 0xF4;
+        const int NoMessage_MesId = 0xF0;
+        const int AccelSensorData_MesId = 0xF1;
+        const int GyroSensorData_MesId = 0xF2;
+        const int MagnSensorData_MesId = 0xF3;
+        const int EulerAnglesData_MesId = 0xF4;
+        const int MixedData_MesId = 0xF5;
+        const int PidData_MesId = 0xF6;
+        const int AttitudeLog_MesId = 0xF7;
+        const int Empty_MesId = 0xF8;
 
         const int CommandIdx = 1;
         const int TimestampIdx = 14;
@@ -196,14 +217,34 @@ namespace GroundStationApplication
         const int Signal1Idx = 2;
         const int Signal2Idx = 6;
         const int Signal3Idx = 10;
+        const int PitchRefIdx = 2;
+        const int RollRefIdx = 4;
+        const int PitchFeedbackIdx = 6;
+        const int RollFeedbackIdx = 8;
+        const int PitchOutputIdx = 10;
+        const int RollOutputIdx = 12;
+        const int PidP_Idx = 2;
+        const int PidI_Idx = 6;
+        const int PidD_Idx = 10;
+
+        const int TxMessageSize = 7;
+        const int TxMaxMessages = 10;
+
         const Boolean dataLoggingEnabled = false;
+
+        static byte[] messageBuffer = new byte[TxMessageSize * TxMaxMessages];
+        static int numberOfReadyMessages = 0;
 
         static UInt32 samplesCollected = 0;
         static StringBuilder csv = new StringBuilder();
         static Form1 _dataGraph = new Form1();
         static SerialPortInterface _serialPortInterface = new SerialPortInterface();
-        
-        public void WritePlotData(float x, float y, float z)
+        private static Object thisLock = new Object();
+        //private static System.Threading.Timer transmitionTimer;
+
+        static Queue messages = new Queue();
+
+        private void WritePlotData(float x, float y, float z)
         {
             _dataGraph.AddData(x, y, z);
         }
@@ -214,6 +255,7 @@ namespace GroundStationApplication
             _serialPortInterface.MessageReadCallback = new SerialPortInterface.MessageReadHandler(InterpretMessage);
             _dataGraph.UserSentFloatValue = new Form1.UserInputFloatDelegate(SendFloatCommandToDrone);
             _dataGraph.UserSentUInt32Value = new Form1.UserInputUInt32Delegate(SendUInt32CommandToDrone);
+            _dataGraph.UserSentInt32Value = new Form1.UserInputInt32Delegate(SendInt32CommandToDrone);
 
             bool result;
 
@@ -227,32 +269,87 @@ namespace GroundStationApplication
             {
                 Console.WriteLine("port openning successful!");
             }
-            
+
+            /*
+            Timer transmitionTimer = new Timer();
+            transmitionTimer.Interval = 20;
+            transmitionTimer.Tick += new EventHandler(SendMessages);
+            transmitionTimer.Start();
+            //transmitionTimer = new System.Threading.Timer(SendMessages, null, 10, 20);
+            */
             Application.Run(_dataGraph);
             //Console.ReadKey();
             _serialPortInterface.Close();
         }
 
+        static void SendMessages() //(object sender, EventArgs e)
+        {
+            int bufferLength = TxMessageSize;
+            int messageCount = messages.Count;
+            byte[] messageBuf = new byte[TxMessageSize];
+
+            if (0 < messageCount)
+            {
+                messageBuf = (byte[])messages.Dequeue();
+                _serialPortInterface.WriteData(messageBuf, (UInt16)bufferLength);
+            }
+        }
+
         unsafe private static void SendFloatCommandToDrone(float value, Form1.TUserInput ID)
         {
-            byte[] data = new byte[sizeof(float) + 1];
-            data[0] = ((byte*)(&value))[0];
-            data[1] = ((byte*)(&value))[1];
-            data[2] = ((byte*)(&value))[2];
-            data[3] = ((byte*)(&value))[3];
-            data[4] = (byte)ID;
-            _serialPortInterface.WriteData( data, (sizeof(float) + 1) );
+            byte[] messageBuf = new byte[TxMessageSize];
+            lock (GroundStationExecute.thisLock)
+            {
+                messageBuf[0] = (byte)SerialPortInterface.StartByte;
+                messageBuf[1] = ((byte*)(&value))[0];
+                messageBuf[2] = ((byte*)(&value))[1];
+                messageBuf[3] = ((byte*)(&value))[2];
+                messageBuf[4] = ((byte*)(&value))[3];
+                messageBuf[5] = (byte)ID;
+                messageBuf[6] = (byte)SerialPortInterface.EndByte;
+                if (15 > messages.Count)
+                {
+                    messages.Enqueue(messageBuf);
+                }
+            }
         }
 
         unsafe private static void SendUInt32CommandToDrone(UInt32 value, Form1.TUserInput ID)
         {
-            byte[] data = new byte[sizeof(UInt32) + 1];
-            data[0] = ((byte*)(&value))[0];
-            data[1] = ((byte*)(&value))[1];
-            data[2] = ((byte*)(&value))[2];
-            data[3] = ((byte*)(&value))[3];
-            data[4] = (byte)ID;
-            _serialPortInterface.WriteData(data, (sizeof(UInt32) + 1));
+            byte[] messageBuf = new byte[TxMessageSize];
+            lock (GroundStationExecute.thisLock)
+            {
+                messageBuf[0] = (byte)SerialPortInterface.StartByte;
+                messageBuf[1] = ((byte*)(&value))[0];
+                messageBuf[2] = ((byte*)(&value))[1];
+                messageBuf[3] = ((byte*)(&value))[2];
+                messageBuf[4] = ((byte*)(&value))[3];
+                messageBuf[5] = (byte)ID;
+                messageBuf[6] = (byte)SerialPortInterface.EndByte;
+                if (15 > messages.Count)
+                {
+                    messages.Enqueue(messageBuf);
+                }
+            }
+        }
+
+        unsafe private static void SendInt32CommandToDrone(Int32 value, Form1.TUserInput ID)
+        {
+            byte[] messageBuf = new byte[TxMessageSize];
+            lock (GroundStationExecute.thisLock)
+            {
+                messageBuf[0] = (byte)SerialPortInterface.StartByte;
+                messageBuf[1] = ((byte*)(&value))[0];
+                messageBuf[2] = ((byte*)(&value))[1];
+                messageBuf[3] = ((byte*)(&value))[2];
+                messageBuf[4] = ((byte*)(&value))[3];
+                messageBuf[5] = (byte)ID;
+                messageBuf[6] = (byte)SerialPortInterface.EndByte;
+                if (15 > messages.Count)
+                {
+                    messages.Enqueue(messageBuf);
+                }
+            }
         }
 
         private static void InterpretMessage(byte[] dataBuffer, byte mesID)
@@ -275,9 +372,24 @@ namespace GroundStationApplication
             float signal1;
             float signal2;
             float signal3;
+            float pidP;
+            float pidI;
+            float pidD;
+            Int16 pitchRef;
+            Int16 rollRef;
+            Int16 pitchFeedback;
+            Int16 rollFeedback;
+            Int16 pitchOutput;
+            Int16 rollOutput;
             string first;
             string second;
             string third;
+            string fourth;
+            string fifth;
+            string sixth;
+            string FileName1 = "C:/Users/Lurch/GIT/Quad/tools/CollectedDataSamples/newData.csv";
+            string FileName2 = "C:/Users/Lurch/GIT/Quad/tools/CollectedDataSamples/AttitudeLog.csv";
+            string ptest = System.DateTime.Now.ToString("yyyyMMdd_hhmm");
 
             if (AccelSensorData_MesId == dataBuffer[CommandIdx] )
             {
@@ -306,11 +418,34 @@ namespace GroundStationApplication
                 //miliseconds = BitConverter.ToUInt16(dataBuffer, TimestampIdx);
                 //minutes = dataBuffer[TimestampIdx + 3];
                 //seconds = dataBuffer[TimestampIdx + 2];
-                magnx = ((BitConverter.ToSingle(dataBuffer, MagnxIdx)) / 1.3f) * 1100.0f;
-                magny = ((BitConverter.ToSingle(dataBuffer, MagnyIdx)) / 1.3f) * 1100.0f;
-                magnz = ((BitConverter.ToSingle(dataBuffer, MagnzIdx)) / 1.3f) * 1100.0f;
 
-                _dataGraph.AddData(magnx, magny, magnz);
+                if (true == dataLoggingEnabled)
+                {
+                    if(10000 > samplesCollected)
+                    {
+                        magnx = (BitConverter.ToSingle(dataBuffer, MagnxIdx));
+                        magny = (BitConverter.ToSingle(dataBuffer, MagnyIdx));
+                        magnz = (BitConverter.ToSingle(dataBuffer, MagnzIdx));
+                        first = Convert.ToString(magnx);
+                        second = Convert.ToString(magny);
+                        third = Convert.ToString(magnz);
+                        samplesCollected++;
+                        var newLine = string.Format("{0},{1},{2}", first, second, third);
+                        csv.AppendLine(newLine);
+                        if (3000 == samplesCollected)
+                        {
+                            FileName1 = FileName1.Replace(".csv", "_" + ptest + ".csv");
+                            File.WriteAllText(FileName1, csv.ToString());
+                        }
+                    }
+                }
+                else
+                {
+                    magnx = ((BitConverter.ToSingle(dataBuffer, MagnxIdx)) / 1.3f) * 1100.0f;
+                    magny = ((BitConverter.ToSingle(dataBuffer, MagnyIdx)) / 1.3f) * 1100.0f;
+                    magnz = ((BitConverter.ToSingle(dataBuffer, MagnzIdx)) / 1.3f) * 1100.0f;
+                    _dataGraph.AddData(magnx, magny, magnz);
+                }
             }
             else if (EulerAnglesData_MesId == dataBuffer[CommandIdx])
             {
@@ -340,9 +475,16 @@ namespace GroundStationApplication
                         csv.AppendLine(newLine);
                         if (1000 == samplesCollected)
                         {
-                            File.WriteAllText("C:/Users/Lurch/GIT/Quad/tools/CollectedDataSamples/newData.csv", csv.ToString());
+                            FileName1 = FileName1.Replace(".csv", "_" + ptest + ".csv");
+                            File.WriteAllText(FileName1, csv.ToString());
                         }
                     }
+                }
+                else
+                {
+                    signal1 = signal1;
+                    signal2 = (signal2 / 45) * 1100.0f;
+                    signal3 = signal3 * 10.0f * 1100.0f;
                 }
 
                 _dataGraph.AddData(signal1, signal2, signal3);
@@ -350,10 +492,52 @@ namespace GroundStationApplication
                 //Console.WriteLine(seconds);
                 //Console.WriteLine(accz);
             }
+            else if (AttitudeLog_MesId == dataBuffer[CommandIdx])
+            {
+                pitchRef = BitConverter.ToInt16(dataBuffer, PitchRefIdx);
+                rollRef = BitConverter.ToInt16(dataBuffer, RollRefIdx);
+                pitchFeedback = BitConverter.ToInt16(dataBuffer, PitchFeedbackIdx);
+                rollFeedback = BitConverter.ToInt16(dataBuffer, RollFeedbackIdx);
+                pitchOutput = BitConverter.ToInt16(dataBuffer, PitchOutputIdx);
+                rollOutput = BitConverter.ToInt16(dataBuffer, RollOutputIdx);
+
+                if (2000 > samplesCollected)
+                {
+                    first = Convert.ToString(pitchRef);
+                    second = Convert.ToString(rollRef);
+                    third = Convert.ToString(pitchFeedback);
+                    fourth = Convert.ToString(rollFeedback);
+                    fifth = Convert.ToString(pitchOutput);
+                    sixth = Convert.ToString(rollOutput);
+                    samplesCollected++;
+                    var newLine = string.Format("{0},{1},{2},{3},{4},{5}", first, second, third, fourth, fifth, sixth);
+                    csv.AppendLine(newLine);
+                    if (2000 == samplesCollected)
+                    {
+                        FileName2 = FileName2.Replace(".csv", "_" + ptest + ".csv");
+                        File.WriteAllText(FileName2, csv.ToString());
+                    }
+                }
+
+            }
+            else if (PidData_MesId == dataBuffer[CommandIdx])
+            {
+                pidP = BitConverter.ToSingle(dataBuffer, PidP_Idx);
+                pidI = BitConverter.ToSingle(dataBuffer, PidI_Idx);
+                pidD = BitConverter.ToSingle(dataBuffer, PidD_Idx);
+
+                _dataGraph.Refresh_PidData(pidP, pidI, pidD);
+            }
+            else if(Empty_MesId == dataBuffer[CommandIdx])
+            {
+
+            }
             else
             {
                 Console.WriteLine("Wrong data read!");
             }
+
+            SendMessages();
         }
     }
 }
