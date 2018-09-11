@@ -12,49 +12,6 @@ using System.Runtime.InteropServices;
 
 namespace GroundStationApplication
 {
-    class AccurateTimer
-    {
-        private delegate void TimerEventDel(int id, int msg, IntPtr user, int dw1, int dw2);
-        private const int TIME_PERIODIC = 1;
-        private const int EVENT_TYPE = TIME_PERIODIC;// + 0x100;  // TIME_KILL_SYNCHRONOUS causes a hang ?!
-        [DllImport("winmm.dll")]
-        private static extern int timeBeginPeriod(int msec);
-        [DllImport("winmm.dll")]
-        private static extern int timeEndPeriod(int msec);
-        [DllImport("winmm.dll")]
-        private static extern int timeSetEvent(int delay, int resolution, TimerEventDel handler, IntPtr user, int eventType);
-        [DllImport("winmm.dll")]
-        private static extern int timeKillEvent(int id);
-
-        Action mAction;
-        Form mForm;
-        private int mTimerId;
-        private TimerEventDel mHandler;  // NOTE: declare at class scope so garbage collector doesn't release it!!!
-
-        public AccurateTimer(Form form, Action action, int delay)
-        {
-            mAction = action;
-            mForm = form;
-            timeBeginPeriod(1);
-            mHandler = new TimerEventDel(TimerCallback);
-            mTimerId = timeSetEvent(delay, 0, mHandler, IntPtr.Zero, EVENT_TYPE);
-        }
-
-        public void Stop()
-        {
-            int err = timeKillEvent(mTimerId);
-            timeEndPeriod(1);
-            System.Threading.Thread.Sleep(100);// Ensure callbacks are drained
-        }
-
-        private void TimerCallback(int id, int msg, IntPtr user, int dw1, int dw2)
-        {
-            if (mTimerId != 0)
-
-                mForm.BeginInvoke(mAction);
-        }
-    }
-
     public partial class Form1 : Form
     {
         public enum TUserInput
@@ -75,7 +32,8 @@ namespace GroundStationApplication
             MESSEL,
             SELECTPID,
             CONTROLX,
-            CONTROLY
+            CONTROLY,
+            IDLEMES
         };
 
         public delegate void UserInputFloatDelegate(float valToSend, TUserInput ID);
@@ -138,23 +96,19 @@ namespace GroundStationApplication
         private ComboBox SelectPid_comboBox;
         public UserInputInt32Delegate UserSentInt32Value;
         Gamepad gamepad;
-        //private static System.Threading.Timer gamepadTimer;
         AccurateTimer gamepadTimer;
         private UInt32 lastControlXY = 0;
+        private TextBox textBox_Val1;
+        private TextBox textBox_Val2;
+        private TextBox textBox_Val3;
         private UInt32 ticksCount = 0;
+        private UInt16 redrawCounter = 0;
 
         public Form1()
         {
             InitializeComponent();
-
-            //gamepadTimer = new System.Threading.Timer(Tick, null, 20, 45);
-            //Timer gamepadTimer = new Timer();
-            //gamepadTimer.Interval = 20;
-            //gamepadTimer.Tick += new EventHandler(Tick);
-            //gamepadTimer.Start();
         }
         
-        //private void Tick(object sender)
         private void Tick()
         {
             if(Gamepad.Gamepads.Count > 0)
@@ -380,10 +334,13 @@ namespace GroundStationApplication
 
         private void AddValue(float x, float y, float z)
         {
-            historyX[nextWrite] = x;
-            historyY[nextWrite] = y;
-            historyZ[nextWrite] = z;
-            nextWrite = (nextWrite + 1) % historyLength;
+            if ((x != Double.NaN) && (y != Double.NaN) && (z != Double.NaN))
+            {
+                historyX[nextWrite] = x;
+                historyY[nextWrite] = y;
+                historyZ[nextWrite] = z;
+                nextWrite = (nextWrite + 1) % historyLength;
+            }
         }
 
         private void accx_Paint(object sender, PaintEventArgs e)
@@ -464,58 +421,66 @@ namespace GroundStationApplication
             }
         }
 
-        public void AddData(float accx, float accy, float accz)
+        public void AddData(float signal1, float signal2, float signal3)
         {
-            float accxScaled;
-            float accyScaled;
-            float acczScaled;
+            float sig1Scaled;
+            float sig2Scaled;
+            float sig3Scaled;
 
-            if(1100.0 < accx)
+            if(1100.0 < signal1)
             {
-                accxScaled = 1100.0f;
+                sig1Scaled = 1100.0f;
             }
-            else if(-1100.0 > accx)
+            else if(-1100.0 > signal1)
             {
-                accxScaled = -1100.0f;
+                sig1Scaled = -1100.0f;
             }
             else
             {
-                accxScaled = accx;
+                sig1Scaled = signal1;
             }
 
-            if (1100.0 < accy)
+            if (1100.0 < signal2)
             {
-                accyScaled = 1100.0f;
+                sig2Scaled = 1100.0f;
             }
-            else if (-1100.0 > accy)
+            else if (-1100.0 > signal2)
             {
-                accyScaled = -1100.0f;
+                sig2Scaled = -1100.0f;
             }
             else
             {
-                accyScaled = accy;
+                sig2Scaled = signal2;
             }
 
-            if (1100.0 < accz)
+            if (1100.0 < signal3)
             {
-                acczScaled = 1100.0f;
+                sig3Scaled = 1100.0f;
             }
-            else if (-1100.0 > accz)
+            else if (-1100.0 > signal3)
             {
-                acczScaled = -1100.0f;
+                sig3Scaled = -1100.0f;
             }
             else
             {
-                acczScaled = accz;
+                sig3Scaled = signal3;
             }
 
-            accxScaled = ((accxScaled / 1100.0f) * (this.accx.Size.Height / 2)) + (this.accx.Size.Height / 2);
-            accyScaled = ((accyScaled / 1100.0f) * (this.accy.Size.Height / 2)) + (this.accy.Size.Height / 2);
-            acczScaled = ((acczScaled / 1100.0f) * (this.accz.Size.Height / 2)) + (this.accz.Size.Height / 2);
-            AddValue(accxScaled, accyScaled, acczScaled);
-            this.accx.Invalidate();
-            this.accy.Invalidate();
-            this.accz.Invalidate();
+            sig1Scaled = ((sig1Scaled / 1100.0f) * (this.accx.Size.Height / 2)) + (this.accx.Size.Height / 2);
+            sig2Scaled = ((sig2Scaled / 1100.0f) * (this.accy.Size.Height / 2)) + (this.accy.Size.Height / 2);
+            sig3Scaled = ((sig3Scaled / 1100.0f) * (this.accz.Size.Height / 2)) + (this.accz.Size.Height / 2);
+            AddValue(sig1Scaled, sig2Scaled, sig3Scaled);
+            if (0 == redrawCounter)
+            {
+                this.accx.Invalidate();
+                this.accy.Invalidate();
+                this.accz.Invalidate();
+            }
+            redrawCounter++;
+            if(8 == redrawCounter)
+            {
+                redrawCounter = 0;
+            }
         }
 
         public void Refresh_PidData(float pidP, float pidI, float pidD)
@@ -527,6 +492,20 @@ namespace GroundStationApplication
                     this.pidkp_textBox.Text = Convert.ToString(pidP);
                     this.pidki_textBox.Text = Convert.ToString(pidI);
                     this.pidkd_textBox.Text = Convert.ToString(pidD);
+                }));
+                return;
+            }
+        }
+
+        public void RefreshDisplayedValues(float valX, float valY, float valZ)
+        {
+            if (InvokeRequired)
+            {
+                // after we've done all the processing, 
+                this.Invoke(new MethodInvoker(delegate {
+                    this.textBox_Val1.Text = Convert.ToString(valX);
+                    this.textBox_Val2.Text = Convert.ToString(valY);
+                    this.textBox_Val3.Text = Convert.ToString(valZ);
                 }));
                 return;
             }
@@ -567,6 +546,9 @@ namespace GroundStationApplication
             this.Mot3Speed = new System.Windows.Forms.Label();
             this.Mot4Speed = new System.Windows.Forms.Label();
             this.SelectPid_comboBox = new System.Windows.Forms.ComboBox();
+            this.textBox_Val1 = new System.Windows.Forms.TextBox();
+            this.textBox_Val2 = new System.Windows.Forms.TextBox();
+            this.textBox_Val3 = new System.Windows.Forms.TextBox();
             this.tableLayoutPanel1.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.accx)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.accy)).BeginInit();
@@ -594,7 +576,7 @@ namespace GroundStationApplication
             this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 30F));
             this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 30F));
             this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 10F));
-            this.tableLayoutPanel1.Size = new System.Drawing.Size(708, 452);
+            this.tableLayoutPanel1.Size = new System.Drawing.Size(708, 472);
             this.tableLayoutPanel1.TabIndex = 0;
             this.tableLayoutPanel1.Paint += new System.Windows.Forms.PaintEventHandler(this.tableLayoutPanel1_Paint);
             // 
@@ -604,7 +586,7 @@ namespace GroundStationApplication
             this.accx.Dock = System.Windows.Forms.DockStyle.Fill;
             this.accx.Location = new System.Drawing.Point(3, 3);
             this.accx.Name = "accx";
-            this.accx.Size = new System.Drawing.Size(702, 129);
+            this.accx.Size = new System.Drawing.Size(702, 135);
             this.accx.TabIndex = 0;
             this.accx.TabStop = false;
             this.accx.Paint += new System.Windows.Forms.PaintEventHandler(this.accx_Paint);
@@ -613,9 +595,9 @@ namespace GroundStationApplication
             // 
             this.accy.BorderStyle = System.Windows.Forms.BorderStyle.Fixed3D;
             this.accy.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.accy.Location = new System.Drawing.Point(3, 138);
+            this.accy.Location = new System.Drawing.Point(3, 144);
             this.accy.Name = "accy";
-            this.accy.Size = new System.Drawing.Size(702, 129);
+            this.accy.Size = new System.Drawing.Size(702, 135);
             this.accy.TabIndex = 1;
             this.accy.TabStop = false;
             this.accy.Paint += new System.Windows.Forms.PaintEventHandler(this.accy_Paint);
@@ -624,23 +606,23 @@ namespace GroundStationApplication
             // 
             this.accz.BorderStyle = System.Windows.Forms.BorderStyle.Fixed3D;
             this.accz.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.accz.Location = new System.Drawing.Point(3, 273);
+            this.accz.Location = new System.Drawing.Point(3, 285);
             this.accz.Name = "accz";
-            this.accz.Size = new System.Drawing.Size(702, 129);
+            this.accz.Size = new System.Drawing.Size(702, 135);
             this.accz.TabIndex = 2;
             this.accz.TabStop = false;
             this.accz.Paint += new System.Windows.Forms.PaintEventHandler(this.accz_Paint);
             // 
             // pidkp_textBox
             // 
-            this.pidkp_textBox.Location = new System.Drawing.Point(714, 222);
+            this.pidkp_textBox.Location = new System.Drawing.Point(803, 231);
             this.pidkp_textBox.Name = "pidkp_textBox";
             this.pidkp_textBox.Size = new System.Drawing.Size(50, 20);
             this.pidkp_textBox.TabIndex = 0;
             // 
             // kpsend_button
             // 
-            this.kpsend_button.Location = new System.Drawing.Point(773, 222);
+            this.kpsend_button.Location = new System.Drawing.Point(862, 231);
             this.kpsend_button.Name = "kpsend_button";
             this.kpsend_button.Size = new System.Drawing.Size(75, 20);
             this.kpsend_button.TabIndex = 1;
@@ -650,21 +632,21 @@ namespace GroundStationApplication
             // 
             // pidki_textBox
             // 
-            this.pidki_textBox.Location = new System.Drawing.Point(714, 248);
+            this.pidki_textBox.Location = new System.Drawing.Point(803, 257);
             this.pidki_textBox.Name = "pidki_textBox";
             this.pidki_textBox.Size = new System.Drawing.Size(50, 20);
             this.pidki_textBox.TabIndex = 2;
             // 
             // pidkd_textBox
             // 
-            this.pidkd_textBox.Location = new System.Drawing.Point(714, 274);
+            this.pidkd_textBox.Location = new System.Drawing.Point(803, 283);
             this.pidkd_textBox.Name = "pidkd_textBox";
             this.pidkd_textBox.Size = new System.Drawing.Size(50, 20);
             this.pidkd_textBox.TabIndex = 3;
             // 
             // kisend_button
             // 
-            this.kisend_button.Location = new System.Drawing.Point(773, 248);
+            this.kisend_button.Location = new System.Drawing.Point(862, 257);
             this.kisend_button.Name = "kisend_button";
             this.kisend_button.Size = new System.Drawing.Size(75, 20);
             this.kisend_button.TabIndex = 4;
@@ -674,7 +656,7 @@ namespace GroundStationApplication
             // 
             // kdsend_button
             // 
-            this.kdsend_button.Location = new System.Drawing.Point(773, 274);
+            this.kdsend_button.Location = new System.Drawing.Point(862, 283);
             this.kdsend_button.Name = "kdsend_button";
             this.kdsend_button.Size = new System.Drawing.Size(75, 20);
             this.kdsend_button.TabIndex = 5;
@@ -693,14 +675,14 @@ namespace GroundStationApplication
             "TakeOff",
             "FlyManual",
             "FlyAssisted"});
-            this.state_ComboBox.Location = new System.Drawing.Point(714, 30);
+            this.state_ComboBox.Location = new System.Drawing.Point(803, 39);
             this.state_ComboBox.Name = "state_ComboBox";
             this.state_ComboBox.Size = new System.Drawing.Size(100, 21);
             this.state_ComboBox.TabIndex = 8;
             // 
             // setstate_button
             // 
-            this.setstate_button.Location = new System.Drawing.Point(820, 31);
+            this.setstate_button.Location = new System.Drawing.Point(909, 40);
             this.setstate_button.Name = "setstate_button";
             this.setstate_button.Size = new System.Drawing.Size(75, 20);
             this.setstate_button.TabIndex = 9;
@@ -710,28 +692,28 @@ namespace GroundStationApplication
             // 
             // set_kalmanQ_textBox
             // 
-            this.set_kalmanQ_textBox.Location = new System.Drawing.Point(714, 325);
+            this.set_kalmanQ_textBox.Location = new System.Drawing.Point(803, 334);
             this.set_kalmanQ_textBox.Name = "set_kalmanQ_textBox";
             this.set_kalmanQ_textBox.Size = new System.Drawing.Size(50, 20);
             this.set_kalmanQ_textBox.TabIndex = 10;
             // 
             // set_kalmanR_textBox
             // 
-            this.set_kalmanR_textBox.Location = new System.Drawing.Point(714, 352);
+            this.set_kalmanR_textBox.Location = new System.Drawing.Point(803, 361);
             this.set_kalmanR_textBox.Name = "set_kalmanR_textBox";
             this.set_kalmanR_textBox.Size = new System.Drawing.Size(50, 20);
             this.set_kalmanR_textBox.TabIndex = 11;
             // 
             // set_kalmanP_textBox
             // 
-            this.set_kalmanP_textBox.Location = new System.Drawing.Point(714, 378);
+            this.set_kalmanP_textBox.Location = new System.Drawing.Point(803, 387);
             this.set_kalmanP_textBox.Name = "set_kalmanP_textBox";
             this.set_kalmanP_textBox.Size = new System.Drawing.Size(50, 20);
             this.set_kalmanP_textBox.TabIndex = 12;
             // 
             // set_kalmanQ_button
             // 
-            this.set_kalmanQ_button.Location = new System.Drawing.Point(773, 325);
+            this.set_kalmanQ_button.Location = new System.Drawing.Point(862, 334);
             this.set_kalmanQ_button.Name = "set_kalmanQ_button";
             this.set_kalmanQ_button.Size = new System.Drawing.Size(80, 20);
             this.set_kalmanQ_button.TabIndex = 13;
@@ -741,7 +723,7 @@ namespace GroundStationApplication
             // 
             // set_kalmanR_button
             // 
-            this.set_kalmanR_button.Location = new System.Drawing.Point(773, 352);
+            this.set_kalmanR_button.Location = new System.Drawing.Point(862, 361);
             this.set_kalmanR_button.Name = "set_kalmanR_button";
             this.set_kalmanR_button.Size = new System.Drawing.Size(80, 20);
             this.set_kalmanR_button.TabIndex = 14;
@@ -751,7 +733,7 @@ namespace GroundStationApplication
             // 
             // set_kalmanP_button
             // 
-            this.set_kalmanP_button.Location = new System.Drawing.Point(773, 378);
+            this.set_kalmanP_button.Location = new System.Drawing.Point(862, 387);
             this.set_kalmanP_button.Name = "set_kalmanP_button";
             this.set_kalmanP_button.Size = new System.Drawing.Size(80, 20);
             this.set_kalmanP_button.TabIndex = 15;
@@ -761,14 +743,14 @@ namespace GroundStationApplication
             // 
             // pitch_textBox
             // 
-            this.pitch_textBox.Location = new System.Drawing.Point(714, 300);
+            this.pitch_textBox.Location = new System.Drawing.Point(803, 309);
             this.pitch_textBox.Name = "pitch_textBox";
             this.pitch_textBox.Size = new System.Drawing.Size(50, 20);
             this.pitch_textBox.TabIndex = 16;
             // 
             // pitchsend_button
             // 
-            this.pitchsend_button.Location = new System.Drawing.Point(773, 300);
+            this.pitchsend_button.Location = new System.Drawing.Point(862, 309);
             this.pitchsend_button.Name = "pitchsend_button";
             this.pitchsend_button.Size = new System.Drawing.Size(75, 20);
             this.pitchsend_button.TabIndex = 17;
@@ -778,7 +760,7 @@ namespace GroundStationApplication
             // 
             // messel_button
             // 
-            this.messel_button.Location = new System.Drawing.Point(820, 4);
+            this.messel_button.Location = new System.Drawing.Point(909, 13);
             this.messel_button.Name = "messel_button";
             this.messel_button.Size = new System.Drawing.Size(75, 20);
             this.messel_button.TabIndex = 19;
@@ -797,7 +779,7 @@ namespace GroundStationApplication
             "EulerMes",
             "MixedMes",
             "AttitudeLogMes"});
-            this.messel_comboBox.Location = new System.Drawing.Point(714, 3);
+            this.messel_comboBox.Location = new System.Drawing.Point(803, 12);
             this.messel_comboBox.Name = "messel_comboBox";
             this.messel_comboBox.Size = new System.Drawing.Size(100, 21);
             this.messel_comboBox.TabIndex = 20;
@@ -810,7 +792,7 @@ namespace GroundStationApplication
             0,
             0,
             0});
-            this.setspeedUpDown.Location = new System.Drawing.Point(714, 57);
+            this.setspeedUpDown.Location = new System.Drawing.Point(803, 66);
             this.setspeedUpDown.Maximum = new decimal(new int[] {
             2000,
             0,
@@ -838,7 +820,7 @@ namespace GroundStationApplication
             0,
             0,
             0});
-            this.setMot1UpDown.Location = new System.Drawing.Point(714, 83);
+            this.setMot1UpDown.Location = new System.Drawing.Point(803, 92);
             this.setMot1UpDown.Maximum = new decimal(new int[] {
             500,
             0,
@@ -861,7 +843,7 @@ namespace GroundStationApplication
             0,
             0,
             0});
-            this.setMot2UpDown.Location = new System.Drawing.Point(714, 109);
+            this.setMot2UpDown.Location = new System.Drawing.Point(803, 118);
             this.setMot2UpDown.Maximum = new decimal(new int[] {
             500,
             0,
@@ -884,7 +866,7 @@ namespace GroundStationApplication
             0,
             0,
             0});
-            this.setMot3UpDown.Location = new System.Drawing.Point(714, 135);
+            this.setMot3UpDown.Location = new System.Drawing.Point(803, 144);
             this.setMot3UpDown.Maximum = new decimal(new int[] {
             500,
             0,
@@ -907,7 +889,7 @@ namespace GroundStationApplication
             0,
             0,
             0});
-            this.setMot4UpDown.Location = new System.Drawing.Point(714, 161);
+            this.setMot4UpDown.Location = new System.Drawing.Point(803, 170);
             this.setMot4UpDown.Maximum = new decimal(new int[] {
             500,
             0,
@@ -926,7 +908,7 @@ namespace GroundStationApplication
             // SetSpeed
             // 
             this.SetSpeed.AutoSize = true;
-            this.SetSpeed.Location = new System.Drawing.Point(770, 57);
+            this.SetSpeed.Location = new System.Drawing.Point(859, 66);
             this.SetSpeed.Name = "SetSpeed";
             this.SetSpeed.Size = new System.Drawing.Size(54, 13);
             this.SetSpeed.TabIndex = 34;
@@ -935,7 +917,7 @@ namespace GroundStationApplication
             // Mot1Speed
             // 
             this.Mot1Speed.AutoSize = true;
-            this.Mot1Speed.Location = new System.Drawing.Point(770, 83);
+            this.Mot1Speed.Location = new System.Drawing.Point(859, 92);
             this.Mot1Speed.Name = "Mot1Speed";
             this.Mot1Speed.Size = new System.Drawing.Size(62, 13);
             this.Mot1Speed.TabIndex = 35;
@@ -944,7 +926,7 @@ namespace GroundStationApplication
             // Mot2Speed
             // 
             this.Mot2Speed.AutoSize = true;
-            this.Mot2Speed.Location = new System.Drawing.Point(770, 109);
+            this.Mot2Speed.Location = new System.Drawing.Point(859, 118);
             this.Mot2Speed.Name = "Mot2Speed";
             this.Mot2Speed.Size = new System.Drawing.Size(62, 13);
             this.Mot2Speed.TabIndex = 36;
@@ -953,7 +935,7 @@ namespace GroundStationApplication
             // Mot3Speed
             // 
             this.Mot3Speed.AutoSize = true;
-            this.Mot3Speed.Location = new System.Drawing.Point(770, 135);
+            this.Mot3Speed.Location = new System.Drawing.Point(859, 144);
             this.Mot3Speed.Name = "Mot3Speed";
             this.Mot3Speed.Size = new System.Drawing.Size(62, 13);
             this.Mot3Speed.TabIndex = 37;
@@ -962,7 +944,7 @@ namespace GroundStationApplication
             // Mot4Speed
             // 
             this.Mot4Speed.AutoSize = true;
-            this.Mot4Speed.Location = new System.Drawing.Point(770, 161);
+            this.Mot4Speed.Location = new System.Drawing.Point(859, 170);
             this.Mot4Speed.Name = "Mot4Speed";
             this.Mot4Speed.Size = new System.Drawing.Size(62, 13);
             this.Mot4Speed.TabIndex = 38;
@@ -978,16 +960,40 @@ namespace GroundStationApplication
             "PitchRot",
             "RollRot",
             "YawRot"});
-            this.SelectPid_comboBox.Location = new System.Drawing.Point(714, 195);
+            this.SelectPid_comboBox.Location = new System.Drawing.Point(803, 204);
             this.SelectPid_comboBox.Name = "SelectPid_comboBox";
             this.SelectPid_comboBox.Size = new System.Drawing.Size(100, 21);
             this.SelectPid_comboBox.TabIndex = 39;
             this.SelectPid_comboBox.SelectedIndexChanged += new System.EventHandler(this.SelectPid_comboBox_SelectedIndexChanged);
             // 
+            // textBox_Val1
+            // 
+            this.textBox_Val1.Location = new System.Drawing.Point(711, 3);
+            this.textBox_Val1.Name = "textBox_Val1";
+            this.textBox_Val1.Size = new System.Drawing.Size(58, 20);
+            this.textBox_Val1.TabIndex = 40;
+            // 
+            // textBox_Val2
+            // 
+            this.textBox_Val2.Location = new System.Drawing.Point(711, 29);
+            this.textBox_Val2.Name = "textBox_Val2";
+            this.textBox_Val2.Size = new System.Drawing.Size(58, 20);
+            this.textBox_Val2.TabIndex = 41;
+            // 
+            // textBox_Val3
+            // 
+            this.textBox_Val3.Location = new System.Drawing.Point(711, 55);
+            this.textBox_Val3.Name = "textBox_Val3";
+            this.textBox_Val3.Size = new System.Drawing.Size(58, 20);
+            this.textBox_Val3.TabIndex = 42;
+            // 
             // Form1
             // 
             this.AutoScroll = true;
-            this.ClientSize = new System.Drawing.Size(913, 452);
+            this.ClientSize = new System.Drawing.Size(1050, 472);
+            this.Controls.Add(this.textBox_Val3);
+            this.Controls.Add(this.textBox_Val2);
+            this.Controls.Add(this.textBox_Val1);
             this.Controls.Add(this.SelectPid_comboBox);
             this.Controls.Add(this.Mot4Speed);
             this.Controls.Add(this.Mot3Speed);
@@ -1233,6 +1239,50 @@ namespace GroundStationApplication
                 UserSentUInt32Value(SELECTEDPID_YAWROT, TUserInput.SELECTPID);
             }
             else { }
+        }
+    }
+
+    class AccurateTimer
+    {
+        private delegate void TimerEventDel(int id, int msg, IntPtr user, int dw1, int dw2);
+        private const int TIME_PERIODIC = 1;
+        private const int EVENT_TYPE = TIME_PERIODIC;// + 0x100;  // TIME_KILL_SYNCHRONOUS causes a hang ?!
+        [DllImport("winmm.dll")]
+        private static extern int timeBeginPeriod(int msec);
+        [DllImport("winmm.dll")]
+        private static extern int timeEndPeriod(int msec);
+        [DllImport("winmm.dll")]
+        private static extern int timeSetEvent(int delay, int resolution, TimerEventDel handler, IntPtr user, int eventType);
+        [DllImport("winmm.dll")]
+        private static extern int timeKillEvent(int id);
+
+        Action mAction;
+        Form mForm;
+        private int mTimerId;
+        private TimerEventDel mHandler;  // NOTE: declare at class scope so garbage collector doesn't release it!!!
+
+        public AccurateTimer(Form form, Action action, int delay)
+        {
+            mAction = action;
+            mForm = form;
+            timeBeginPeriod(1);
+            mHandler = new TimerEventDel(TimerCallback);
+            mTimerId = timeSetEvent(delay, 0, mHandler, IntPtr.Zero, EVENT_TYPE);
+        }
+
+        public void Stop()
+        {
+            int err = timeKillEvent(mTimerId);
+            timeEndPeriod(1);
+            System.Threading.Thread.Sleep(100);// Ensure callbacks are drained
+        }
+
+        private void TimerCallback(int id, int msg, IntPtr user, int dw1, int dw2)
+        {
+            if (mTimerId != 0)
+            {
+                mForm.BeginInvoke(mAction);
+            }
         }
     }
 }

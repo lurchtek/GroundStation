@@ -2,6 +2,7 @@
 using System.IO;
 using System.IO.Ports;
 using System.Windows.Forms;
+using System.Threading;
 using System.Text;
 using System.Collections;
 
@@ -80,7 +81,7 @@ namespace GroundStationApplication
 
         public void Close()
         {
-            //_serialPort.Close();
+            _serialPort.Close();
         }
 
         public void WriteData(byte[] data, UInt16 size)
@@ -145,7 +146,7 @@ namespace GroundStationApplication
                     else
                     {
                         goto case TReadingState.WaitingForStart;
-                        Console.WriteLine("Wrong data read!");
+                        //Console.WriteLine("Wrong data read!");
                     }
                 case TReadingState.ReadingPayload:
                     while(-1 != byteFromBuf)
@@ -161,7 +162,7 @@ namespace GroundStationApplication
                             }
                             else
                             {
-                                Console.WriteLine("Wrong Stop Condition!");
+                                //Console.WriteLine("Wrong Stop Condition!");
                             }
 
                             bytesReadFromMes = 0;
@@ -227,20 +228,29 @@ namespace GroundStationApplication
         const int PidI_Idx = 6;
         const int PidD_Idx = 10;
 
-        const int TxMessageSize = 7;
+        const int TxMessageSize = 8;
         const int TxMaxMessages = 10;
 
         const Boolean dataLoggingEnabled = false;
 
+        static byte[] IdleMes = { (byte)SerialPortInterface.StartByte, (byte)0, (byte)0, (byte)0, (byte)0, (byte)Form1.TUserInput.IDLEMES, (byte)0, (byte)SerialPortInterface.EndByte };
         static byte[] messageBuffer = new byte[TxMessageSize * TxMaxMessages];
-        static int numberOfReadyMessages = 0;
 
         static UInt32 samplesCollected = 0;
-        static StringBuilder csv = new StringBuilder();
+        static UInt32 accelRawSamplesCollected = 0;
+        static UInt32 accelFiltSamplesCollected = 0;
+        static UInt32 eulerSamplesCollected = 0;
+        static StringBuilder csv1 = new StringBuilder();
+        static StringBuilder csv2 = new StringBuilder();
+        static StringBuilder csv3 = new StringBuilder();
+        static StringBuilder csv4 = new StringBuilder();
+        static StringBuilder csv5 = new StringBuilder();
         static Form1 _dataGraph = new Form1();
         static SerialPortInterface _serialPortInterface = new SerialPortInterface();
         private static Object thisLock = new Object();
-        //private static System.Threading.Timer transmitionTimer;
+        static AccurateTimer transmissionTimer;
+        static UInt32 countL = 0;
+        static UInt32 idleCounter = 0;
 
         static Queue messages = new Queue();
 
@@ -251,7 +261,12 @@ namespace GroundStationApplication
 
         static void Main(string[] args)
         {
+            //Application.SetCompatibleTextRenderingDefault(false);
             Application.EnableVisualStyles();
+
+            Application.ThreadException += new ThreadExceptionEventHandler(Application_ThreadException);
+            AppDomain.CurrentDomain.UnhandledException += new UnhandledExceptionEventHandler(CurrentDomain_UnhandledException);
+
             _serialPortInterface.MessageReadCallback = new SerialPortInterface.MessageReadHandler(InterpretMessage);
             _dataGraph.UserSentFloatValue = new Form1.UserInputFloatDelegate(SendFloatCommandToDrone);
             _dataGraph.UserSentUInt32Value = new Form1.UserInputUInt32Delegate(SendUInt32CommandToDrone);
@@ -270,29 +285,59 @@ namespace GroundStationApplication
                 Console.WriteLine("port openning successful!");
             }
 
-            /*
-            Timer transmitionTimer = new Timer();
-            transmitionTimer.Interval = 20;
-            transmitionTimer.Tick += new EventHandler(SendMessages);
-            transmitionTimer.Start();
-            //transmitionTimer = new System.Threading.Timer(SendMessages, null, 10, 20);
-            */
+            transmissionTimer = new AccurateTimer(_dataGraph, new Action(SendMessages), 10);
+
             Application.Run(_dataGraph);
-            //Console.ReadKey();
             _serialPortInterface.Close();
         }
 
-        static void SendMessages() //(object sender, EventArgs e)
+        static void Application_ThreadException(object sender, ThreadExceptionEventArgs e)
         {
-            int bufferLength = TxMessageSize;
-            int messageCount = messages.Count;
-            byte[] messageBuf = new byte[TxMessageSize];
+            MessageBox.Show(e.Exception.Message, "Unhandled Thread Exception");
+            // here you can log the exception ...
+        }
 
-            if (0 < messageCount)
+        static void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)
+        {
+            MessageBox.Show((e.ExceptionObject as Exception).Message, "Unhandled UI Exception");
+            // here you can log the exception ...
+        }
+
+        static void SendMessages()//object sender, EventArgs e)
+        {
+            int currentMesBufIndex;
+            int messageCount = messages.Count;
+            int bufferLength = TxMessageSize * messageCount;
+            byte[] singleMesBuf = new byte[TxMessageSize];
+            byte[] messageBuf;
+
+            idleCounter++;
+
+            if (80 > idleCounter)
             {
-                messageBuf = (byte[])messages.Dequeue();
-                _serialPortInterface.WriteData(messageBuf, (UInt16)bufferLength);
+                if (0 < bufferLength)
+                {
+                    messageBuf = new byte[bufferLength];
+                    while (0 < messageCount)
+                    {
+                        currentMesBufIndex = (bufferLength - (messageCount * TxMessageSize));
+                        singleMesBuf = (byte[])messages.Dequeue();
+                        messageCount = messages.Count;
+                        singleMesBuf[6] = (byte)messageCount;
+                        Array.ConstrainedCopy(singleMesBuf, 0, messageBuf, currentMesBufIndex, TxMessageSize);
+                        _serialPortInterface.WriteData(messageBuf, (UInt16)bufferLength);
+                    }
+                }
             }
+            else
+            {
+                messageBuf = new byte[TxMessageSize];
+                bufferLength = TxMessageSize;
+                Array.Copy(IdleMes, messageBuf, bufferLength);
+                _serialPortInterface.WriteData(messageBuf, (UInt16)bufferLength);
+                idleCounter = 0;
+            }
+
         }
 
         unsafe private static void SendFloatCommandToDrone(float value, Form1.TUserInput ID)
@@ -306,11 +351,12 @@ namespace GroundStationApplication
                 messageBuf[3] = ((byte*)(&value))[2];
                 messageBuf[4] = ((byte*)(&value))[3];
                 messageBuf[5] = (byte)ID;
-                messageBuf[6] = (byte)SerialPortInterface.EndByte;
+                messageBuf[7] = (byte)SerialPortInterface.EndByte;
                 if (15 > messages.Count)
                 {
                     messages.Enqueue(messageBuf);
                 }
+                else { countL++; }
             }
         }
 
@@ -325,11 +371,12 @@ namespace GroundStationApplication
                 messageBuf[3] = ((byte*)(&value))[2];
                 messageBuf[4] = ((byte*)(&value))[3];
                 messageBuf[5] = (byte)ID;
-                messageBuf[6] = (byte)SerialPortInterface.EndByte;
+                messageBuf[7] = (byte)SerialPortInterface.EndByte;
                 if (15 > messages.Count)
                 {
                     messages.Enqueue(messageBuf);
                 }
+                else { countL++; }
             }
         }
 
@@ -344,11 +391,12 @@ namespace GroundStationApplication
                 messageBuf[3] = ((byte*)(&value))[2];
                 messageBuf[4] = ((byte*)(&value))[3];
                 messageBuf[5] = (byte)ID;
-                messageBuf[6] = (byte)SerialPortInterface.EndByte;
+                messageBuf[7] = (byte)SerialPortInterface.EndByte;
                 if (15 > messages.Count)
                 {
                     messages.Enqueue(messageBuf);
                 }
+                else { countL++; }
             }
         }
 
@@ -357,24 +405,9 @@ namespace GroundStationApplication
             //int miliseconds = 0;
             //int seconds;
             //int minutes;
-            float accx;
-            float accy;
-            float accz;
-            float gyrox;
-            float gyroy;
-            float gyroz;
-            float magnx;
-            float magny;
-            float magnz;
-            float roll;
-            float pitch;
-            float yaw;
             float signal1;
             float signal2;
             float signal3;
-            float pidP;
-            float pidI;
-            float pidD;
             Int16 pitchRef;
             Int16 rollRef;
             Int16 pitchFeedback;
@@ -387,110 +420,160 @@ namespace GroundStationApplication
             string fourth;
             string fifth;
             string sixth;
-            string FileName1 = "C:/Users/Lurch/GIT/Quad/tools/CollectedDataSamples/newData.csv";
+            string FileName1 = "C:/Users/Lurch/GIT/Quad/tools/CollectedDataSamples/MagnData.csv";
             string FileName2 = "C:/Users/Lurch/GIT/Quad/tools/CollectedDataSamples/AttitudeLog.csv";
+            string FileName3 = "C:/Users/Lurch/GIT/Quad/tools/CollectedDataSamples/AccelFiltData.csv";
+            string FileName4 = "C:/Users/Lurch/GIT/Quad/tools/CollectedDataSamples/EulerData.csv";
+            string FileName5 = "C:/Users/Lurch/GIT/Quad/tools/CollectedDataSamples/AccelRawData.csv";
             string ptest = System.DateTime.Now.ToString("yyyyMMdd_hhmm");
 
-            if (AccelSensorData_MesId == dataBuffer[CommandIdx] )
+            if (AccelSensorData_MesId == dataBuffer[CommandIdx])
             {
                 //miliseconds = BitConverter.ToUInt16(dataBuffer, TimestampIdx);
                 //minutes = dataBuffer[TimestampIdx + 3];
                 //seconds = dataBuffer[TimestampIdx + 2];
-                accx = BitConverter.ToSingle(dataBuffer, AccxIdx);
-                accy = BitConverter.ToSingle(dataBuffer, AccyIdx);
-                accz = BitConverter.ToSingle(dataBuffer, AcczIdx);
+                signal1 = BitConverter.ToSingle(dataBuffer, AccxIdx);
+                signal2 = BitConverter.ToSingle(dataBuffer, AccyIdx);
+                signal3 = BitConverter.ToSingle(dataBuffer, AcczIdx);
 
-                _dataGraph.AddData(accx, accy, accz);
+                if (true == dataLoggingEnabled)
+                {
+                    if (1000 > accelRawSamplesCollected)
+                    {
+                        first = Convert.ToString(signal1);
+                        second = Convert.ToString(signal2);
+                        third = Convert.ToString(signal3);
+                        accelRawSamplesCollected++;
+                        var newLine = string.Format("{0},{1},{2}", first, second, third);
+                        csv1.AppendLine(newLine);
+                        if (1000 == accelRawSamplesCollected)
+                        {
+                            FileName5 = FileName5.Replace(".csv", "_" + ptest + ".csv");
+                            File.WriteAllText(FileName5, csv1.ToString());
+                            csv1.Clear();
+                        }
+                    }
+                }
+
+                _dataGraph.RefreshDisplayedValues(signal1, signal2, signal3);
+                _dataGraph.AddData(signal1, signal2, signal3);
             }
             else if (GyroSensorData_MesId == dataBuffer[CommandIdx])
             {
                 //miliseconds = BitConverter.ToUInt16(dataBuffer, TimestampIdx);
                 //minutes = dataBuffer[TimestampIdx + 3];
                 //seconds = dataBuffer[TimestampIdx + 2];
-                gyrox = ((BitConverter.ToSingle(dataBuffer, GyroxIdx)) / 32767.0f) * 1100.0f;
-                gyroy = ((BitConverter.ToSingle(dataBuffer, GyroyIdx)) / 32767.0f) * 1100.0f;
-                gyroz = ((BitConverter.ToSingle(dataBuffer, GyrozIdx)) / 32767.0f) * 1100.0f;
+                signal1 = BitConverter.ToSingle(dataBuffer, GyroxIdx);
+                signal2 = BitConverter.ToSingle(dataBuffer, GyroyIdx);
+                signal3 = BitConverter.ToSingle(dataBuffer, GyrozIdx);
 
-                _dataGraph.AddData(gyrox, gyroy, gyroz);
+                _dataGraph.RefreshDisplayedValues(signal1, signal2, signal3);
+
+                signal1 = ((signal1) / 32767.0f) * 1100.0f;
+                signal2 = ((signal2) / 32767.0f) * 1100.0f;
+                signal3 = ((signal3) / 32767.0f) * 1100.0f;
+
+                _dataGraph.AddData(signal1, signal2, signal3);
             }
             else if (MagnSensorData_MesId == dataBuffer[CommandIdx])
             {
                 //miliseconds = BitConverter.ToUInt16(dataBuffer, TimestampIdx);
                 //minutes = dataBuffer[TimestampIdx + 3];
                 //seconds = dataBuffer[TimestampIdx + 2];
+                signal1 = BitConverter.ToSingle(dataBuffer, MagnxIdx);
+                signal2 = BitConverter.ToSingle(dataBuffer, MagnyIdx);
+                signal3 = BitConverter.ToSingle(dataBuffer, MagnzIdx);
 
                 if (true == dataLoggingEnabled)
                 {
-                    if(10000 > samplesCollected)
-                    {
-                        magnx = (BitConverter.ToSingle(dataBuffer, MagnxIdx));
-                        magny = (BitConverter.ToSingle(dataBuffer, MagnyIdx));
-                        magnz = (BitConverter.ToSingle(dataBuffer, MagnzIdx));
-                        first = Convert.ToString(magnx);
-                        second = Convert.ToString(magny);
-                        third = Convert.ToString(magnz);
-                        samplesCollected++;
-                        var newLine = string.Format("{0},{1},{2}", first, second, third);
-                        csv.AppendLine(newLine);
-                        if (3000 == samplesCollected)
-                        {
-                            FileName1 = FileName1.Replace(".csv", "_" + ptest + ".csv");
-                            File.WriteAllText(FileName1, csv.ToString());
-                        }
-                    }
-                }
-                else
-                {
-                    magnx = ((BitConverter.ToSingle(dataBuffer, MagnxIdx)) / 1.3f) * 1100.0f;
-                    magny = ((BitConverter.ToSingle(dataBuffer, MagnyIdx)) / 1.3f) * 1100.0f;
-                    magnz = ((BitConverter.ToSingle(dataBuffer, MagnzIdx)) / 1.3f) * 1100.0f;
-                    _dataGraph.AddData(magnx, magny, magnz);
-                }
-            }
-            else if (EulerAnglesData_MesId == dataBuffer[CommandIdx])
-            {
-                //miliseconds = BitConverter.ToUInt16(dataBuffer, TimestampIdx);
-                //minutes = dataBuffer[TimestampIdx + 3];
-                //seconds = dataBuffer[TimestampIdx + 2];
-                roll = (BitConverter.ToSingle(dataBuffer, RollIdx)) / 180.0f * 1100.0f;
-                pitch = -((BitConverter.ToSingle(dataBuffer, PitchIdx)) / 90.0f * 1100.0f);
-                yaw = (BitConverter.ToSingle(dataBuffer, YawIdx)) / 180.0f * 1100.0f;
-
-                _dataGraph.AddData(roll, pitch, yaw);
-            }
-            else if (MixedData_MesId == dataBuffer[CommandIdx])
-            {
-                signal1 = BitConverter.ToSingle(dataBuffer, Signal1Idx);
-                signal2 = BitConverter.ToSingle(dataBuffer, Signal2Idx);
-                signal3 = BitConverter.ToSingle(dataBuffer, Signal3Idx);
-                if (true == dataLoggingEnabled)
-                {
-                    if (1000 > samplesCollected)
+                    if (3000 > samplesCollected)
                     {
                         first = Convert.ToString(signal1);
                         second = Convert.ToString(signal2);
                         third = Convert.ToString(signal3);
                         samplesCollected++;
                         var newLine = string.Format("{0},{1},{2}", first, second, third);
-                        csv.AppendLine(newLine);
-                        if (1000 == samplesCollected)
+                        csv2.AppendLine(newLine);
+                        if (3000 == samplesCollected)
                         {
                             FileName1 = FileName1.Replace(".csv", "_" + ptest + ".csv");
-                            File.WriteAllText(FileName1, csv.ToString());
+                            File.WriteAllText(FileName1, csv2.ToString());
+                            csv2.Clear();
+                        }
+                    }
+                } 
+
+                _dataGraph.RefreshDisplayedValues(signal1, signal2, signal3);
+
+                signal1 = ((signal1)) * 30000.0f;
+                signal2 = ((signal2)) * 30000.0f;
+                signal3 = ((signal3)) * 30000.0f;
+                _dataGraph.AddData(signal1, signal2, signal3);
+            }
+            else if (EulerAnglesData_MesId == dataBuffer[CommandIdx])
+            {
+                //miliseconds = BitConverter.ToUInt16(dataBuffer, TimestampIdx);
+                //minutes = dataBuffer[TimestampIdx + 3];
+                //seconds = dataBuffer[TimestampIdx + 2];
+                signal1 = BitConverter.ToSingle(dataBuffer, RollIdx);
+                signal2 = BitConverter.ToSingle(dataBuffer, PitchIdx);
+                signal3 = BitConverter.ToSingle(dataBuffer, YawIdx);
+
+                _dataGraph.RefreshDisplayedValues(signal1, signal2, signal3);
+
+                if (true == dataLoggingEnabled)
+                {
+                    if (1000 > eulerSamplesCollected)
+                    {
+                        first = Convert.ToString(signal1);
+                        second = Convert.ToString(signal2);
+                        third = Convert.ToString(signal3);
+                        eulerSamplesCollected++;
+                        var newLine = string.Format("{0},{1},{2}", first, second, third);
+                        csv3.AppendLine(newLine);
+                        if (1000 == eulerSamplesCollected)
+                        {
+                            FileName4 = FileName4.Replace(".csv", "_" + ptest + ".csv");
+                            File.WriteAllText(FileName4, csv3.ToString());
+                            csv3.Clear();
                         }
                     }
                 }
-                else
+
+                signal1 = (signal1) / 180.0f * 1100.0f;
+                signal2 = -((signal2) / 90.0f * 1100.0f);
+                signal3 = (signal3) / 180.0f * 1100.0f;
+
+                _dataGraph.AddData(signal1, signal2, signal3);
+            }
+            else if (MixedData_MesId == dataBuffer[CommandIdx])
+            {
+                signal1 = BitConverter.ToSingle(dataBuffer, Signal1Idx);
+                signal2 = BitConverter.ToSingle(dataBuffer, Signal2Idx);
+                signal3 = BitConverter.ToSingle(dataBuffer, Signal3Idx);
+
+                _dataGraph.RefreshDisplayedValues(signal1, signal2, signal3);
+
+                if (true == dataLoggingEnabled)
                 {
-                    signal1 = signal1;
-                    signal2 = (signal2 / 45) * 1100.0f;
-                    signal3 = signal3 * 10.0f * 1100.0f;
+                    if (1000 > accelFiltSamplesCollected)
+                    {
+                        first = Convert.ToString(signal1);
+                        second = Convert.ToString(signal2);
+                        third = Convert.ToString(signal3);
+                        accelFiltSamplesCollected++;
+                        var newLine = string.Format("{0},{1},{2}", first, second, third);
+                        csv4.AppendLine(newLine);
+                        if (1000 == accelFiltSamplesCollected)
+                        {
+                            FileName3 = FileName3.Replace(".csv", "_" + ptest + ".csv");
+                            File.WriteAllText(FileName3, csv4.ToString());
+                            csv4.Clear();
+                        }
+                    }
                 }
 
                 _dataGraph.AddData(signal1, signal2, signal3);
-                //Console.WriteLine(minutes);
-                //Console.WriteLine(seconds);
-                //Console.WriteLine(accz);
             }
             else if (AttitudeLog_MesId == dataBuffer[CommandIdx])
             {
@@ -511,22 +594,22 @@ namespace GroundStationApplication
                     sixth = Convert.ToString(rollOutput);
                     samplesCollected++;
                     var newLine = string.Format("{0},{1},{2},{3},{4},{5}", first, second, third, fourth, fifth, sixth);
-                    csv.AppendLine(newLine);
+                    csv5.AppendLine(newLine);
                     if (2000 == samplesCollected)
                     {
                         FileName2 = FileName2.Replace(".csv", "_" + ptest + ".csv");
-                        File.WriteAllText(FileName2, csv.ToString());
+                        File.WriteAllText(FileName2, csv5.ToString());
+                        csv5.Clear();
                     }
                 }
-
             }
             else if (PidData_MesId == dataBuffer[CommandIdx])
             {
-                pidP = BitConverter.ToSingle(dataBuffer, PidP_Idx);
-                pidI = BitConverter.ToSingle(dataBuffer, PidI_Idx);
-                pidD = BitConverter.ToSingle(dataBuffer, PidD_Idx);
+                signal1 = BitConverter.ToSingle(dataBuffer, PidP_Idx);
+                signal2 = BitConverter.ToSingle(dataBuffer, PidI_Idx);
+                signal3 = BitConverter.ToSingle(dataBuffer, PidD_Idx);
 
-                _dataGraph.Refresh_PidData(pidP, pidI, pidD);
+                _dataGraph.Refresh_PidData(signal1, signal2, signal3);
             }
             else if(Empty_MesId == dataBuffer[CommandIdx])
             {
@@ -536,8 +619,6 @@ namespace GroundStationApplication
             {
                 Console.WriteLine("Wrong data read!");
             }
-
-            SendMessages();
         }
     }
 }
